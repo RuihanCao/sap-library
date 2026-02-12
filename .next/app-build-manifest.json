@@ -26,10 +26,15 @@
       "static/chunks/main-app.js",
       "static/chunks/app/api/replays/[id]/route.js"
     ],
-    "/_not-found/page": [
+    "/stats/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/_not-found/page.js"
+      "static/chunks/app/stats/page.js"
+    ],
+    "/api/stats/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/stats/route.js"
     ]
   }
 }
