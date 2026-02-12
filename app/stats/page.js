@@ -331,14 +331,17 @@ export default function StatsPage() {
     toyStats: []
   });
   const [loading, setLoading] = useState(false);
-  const [packSort, setPackSort] = useState("packId");
-  const [packOrder, setPackOrder] = useState("asc");
   const [petSort, setPetSort] = useState("name");
   const [petOrder, setPetOrder] = useState("asc");
   const [perkSort, setPerkSort] = useState("name");
   const [perkOrder, setPerkOrder] = useState("asc");
   const [toySort, setToySort] = useState("name");
   const [toyOrder, setToyOrder] = useState("asc");
+  const [sortMenuOpen, setSortMenuOpen] = useState({
+    pet: false,
+    perk: false,
+    toy: false
+  });
 
   useEffect(() => {
     if (!BUILD_BACKGROUNDS.length) return;
@@ -428,22 +431,6 @@ export default function StatsPage() {
     Unicorn: 6,
     Danger: 7
   };
-  const packSortOptions = filters.scope === "battle"
-    ? [
-        { value: "packId", label: "Pack Order" },
-        { value: "name", label: "Name" },
-        { value: "games", label: "Rounds" },
-        { value: "winrate", label: "Winrate" },
-        { value: "lossrate", label: "Lossrate" },
-        { value: "drawrate", label: "Drawrate" }
-      ]
-    : [
-        { value: "packId", label: "Pack Order" },
-        { value: "name", label: "Name" },
-        { value: "games", label: "Games" },
-        { value: "winrate", label: "Winrate" },
-        { value: "lossrate", label: "Lossrate" }
-      ];
   const itemSortOptions = filters.scope === "battle"
     ? [
         { value: "name", label: "Name" },
@@ -478,29 +465,13 @@ export default function StatsPage() {
     });
   };
   const sortedPackStats = useMemo(() => {
-    return sortRows(stats.packStats, (row) => {
-      const games = Number(row.games || 0);
-      const wins = Number(row.wins || 0);
-      const draws = Number(row.draws || 0);
-      const losses = Math.max(0, games - wins - draws);
-      switch (packSort) {
-        case "packId":
-          return packOrderMap[row.pack] ?? 999;
-        case "name":
-          return row.pack;
-        case "games":
-          return games;
-        case "winrate":
-          return games ? wins / games : 0;
-        case "lossrate":
-          return games ? losses / games : 0;
-        case "drawrate":
-          return games ? draws / games : 0;
-        default:
-          return row.pack;
-      }
-    }, packOrder);
-  }, [stats.packStats, packSort, packOrder]);
+    return [...stats.packStats].sort((a, b) => {
+      const av = packOrderMap[a.pack] ?? 999;
+      const bv = packOrderMap[b.pack] ?? 999;
+      if (av !== bv) return av - bv;
+      return String(a.pack || "").localeCompare(String(b.pack || ""));
+    });
+  }, [stats.packStats]);
   const sortedPetStats = useMemo(() => {
     return sortRows(stats.petStats, (row) => {
       const games = Number(stats.totalGames || 0);
@@ -632,7 +603,7 @@ export default function StatsPage() {
   }, [stats.toyStats, stats.totalGames, toySort, toyOrder]);
 
   return (
-    <main>
+    <main onClick={() => setSortMenuOpen({ pet: false, perk: false, toy: false })}>
       <div className="top-nav">
         <Link href="/" className="nav-link">Explorer</Link>
         <Link href="/stats" className="nav-link active">Stats</Link>
@@ -812,17 +783,6 @@ export default function StatsPage() {
       <section className="section">
         <div className="results-header">
           <h2>Pack Winrates</h2>
-          <div className="stats-controls">
-            <select value={packSort} onChange={(e) => setPackSort(e.target.value)}>
-              {packSortOptions.map((opt) => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
-            <select value={packOrder} onChange={(e) => setPackOrder(e.target.value)}>
-              <option value="asc">Asc</option>
-              <option value="desc">Desc</option>
-            </select>
-          </div>
         </div>
         <div className="stats-cards">
           {sortedPackStats.map((row) => {
@@ -860,16 +820,37 @@ export default function StatsPage() {
       <section className="section">
         <div className="results-header">
           <h2>Pet Impact</h2>
-          <div className="stats-controls">
-            <select value={petSort} onChange={(e) => setPetSort(e.target.value)}>
-              {itemSortOptions.map((opt) => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
-            <select value={petOrder} onChange={(e) => setPetOrder(e.target.value)}>
-              <option value="asc">Asc</option>
-              <option value="desc">Desc</option>
-            </select>
+          <div className="sort-menu" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Sort pet stats"
+              onClick={() => setSortMenuOpen((prev) => ({ pet: !prev.pet, perk: false, toy: false }))}
+            >
+              Sort
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 6h10M4 12h16M4 18h7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+            </button>
+            {sortMenuOpen.pet && (
+              <div className="sort-panel" onClick={(e) => e.stopPropagation()}>
+                <div className="field">
+                  <label>Sort</label>
+                  <select value={petSort} onChange={(e) => setPetSort(e.target.value)}>
+                    {itemSortOptions.map((opt) => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Order</label>
+                  <select value={petOrder} onChange={(e) => setPetOrder(e.target.value)}>
+                    <option value="asc">Asc</option>
+                    <option value="desc">Desc</option>
+                  </select>
+                </div>
+              </div>
+            )}
           </div>
         </div>
         <div className="stats-cards">
@@ -926,16 +907,37 @@ export default function StatsPage() {
       <section className="section">
         <div className="results-header">
           <h2>Perk Impact</h2>
-          <div className="stats-controls">
-            <select value={perkSort} onChange={(e) => setPerkSort(e.target.value)}>
-              {itemSortOptions.map((opt) => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
-            <select value={perkOrder} onChange={(e) => setPerkOrder(e.target.value)}>
-              <option value="asc">Asc</option>
-              <option value="desc">Desc</option>
-            </select>
+          <div className="sort-menu" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Sort perk stats"
+              onClick={() => setSortMenuOpen((prev) => ({ pet: false, perk: !prev.perk, toy: false }))}
+            >
+              Sort
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 6h10M4 12h16M4 18h7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+            </button>
+            {sortMenuOpen.perk && (
+              <div className="sort-panel" onClick={(e) => e.stopPropagation()}>
+                <div className="field">
+                  <label>Sort</label>
+                  <select value={perkSort} onChange={(e) => setPerkSort(e.target.value)}>
+                    {itemSortOptions.map((opt) => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Order</label>
+                  <select value={perkOrder} onChange={(e) => setPerkOrder(e.target.value)}>
+                    <option value="asc">Asc</option>
+                    <option value="desc">Desc</option>
+                  </select>
+                </div>
+              </div>
+            )}
           </div>
         </div>
         <div className="stats-cards">
@@ -992,16 +994,37 @@ export default function StatsPage() {
       <section className="section">
         <div className="results-header">
           <h2>Toy Impact</h2>
-          <div className="stats-controls">
-            <select value={toySort} onChange={(e) => setToySort(e.target.value)}>
-              {itemSortOptions.map((opt) => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
-            <select value={toyOrder} onChange={(e) => setToyOrder(e.target.value)}>
-              <option value="asc">Asc</option>
-              <option value="desc">Desc</option>
-            </select>
+          <div className="sort-menu" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Sort toy stats"
+              onClick={() => setSortMenuOpen((prev) => ({ pet: false, perk: false, toy: !prev.toy }))}
+            >
+              Sort
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 6h10M4 12h16M4 18h7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+            </button>
+            {sortMenuOpen.toy && (
+              <div className="sort-panel" onClick={(e) => e.stopPropagation()}>
+                <div className="field">
+                  <label>Sort</label>
+                  <select value={toySort} onChange={(e) => setToySort(e.target.value)}>
+                    {itemSortOptions.map((opt) => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Order</label>
+                  <select value={toyOrder} onChange={(e) => setToyOrder(e.target.value)}>
+                    <option value="asc">Asc</option>
+                    <option value="desc">Desc</option>
+                  </select>
+                </div>
+              </div>
+            )}
           </div>
         </div>
         <div className="stats-cards">

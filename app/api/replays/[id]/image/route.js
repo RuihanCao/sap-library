@@ -84,7 +84,11 @@ export async function GET(req, context) {
       }
     });
   } catch (err) {
-    console.error("Replay image render failed", { id, error: err?.message || err });
+    console.error("Replay image render failed", {
+      id,
+      error: err?.message || err,
+      stack: err?.stack || null
+    });
     return NextResponse.json({ error: "failed to render image" }, { status: 500 });
   }
 }
