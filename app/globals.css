@@ -1,4 +1,13 @@
-@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700&family=Sora:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap");
+@font-face {
+  font-family: "Lapsus Pro";
+  src: local("Lapsus Pro"), local("LapsusPro"),
+    url("/fonts/LapsusPro-Regular.otf") format("opentype");
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
 
 :root {
   --bg: #f3f6fb;
@@ -24,7 +33,7 @@
 
 body {
   margin: 0;
-  font-family: "Sora", sans-serif;
+  font-family: "Lapsus Pro", "Inter", sans-serif;
   color: var(--ink);
   background-color: var(--bg);
   background-image:
@@ -56,7 +65,7 @@ main {
 }
 
 h1, h2, h3, h4 {
-  font-family: "Outfit", sans-serif;
+  font-family: "Lapsus Pro", "Inter", sans-serif;
   letter-spacing: -0.02em;
 }
 
@@ -151,7 +160,7 @@ p {
 }
 
 label {
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "Lapsus Pro", "Inter", sans-serif;
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.12em;
@@ -246,7 +255,7 @@ button:hover:not(:disabled) {
 .advanced-panel summary {
   cursor: pointer;
   list-style: none;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "Lapsus Pro", "Inter", sans-serif;
   text-transform: uppercase;
   letter-spacing: 0.12em;
   color: var(--muted);
@@ -359,7 +368,7 @@ button:hover:not(:disabled) {
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.2em;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "Lapsus Pro", "Inter", sans-serif;
   background: linear-gradient(160deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.35));
 }
 
@@ -405,7 +414,7 @@ button:hover:not(:disabled) {
   text-transform: uppercase;
   letter-spacing: 0.12em;
   color: var(--muted);
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "Lapsus Pro", "Inter", sans-serif;
 }
 
 .world-name {
@@ -458,7 +467,7 @@ button:hover:not(:disabled) {
   font-size: 11px;
   letter-spacing: 0.06em;
   font-weight: 600;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "Lapsus Pro", "Inter", sans-serif;
   color: var(--accent);
   text-align: center;
   line-height: 1.1;
@@ -611,7 +620,7 @@ button:hover:not(:disabled) {
   color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "Lapsus Pro", "Inter", sans-serif;
 }
 
 .modal-grid .label {
@@ -621,7 +630,7 @@ button:hover:not(:disabled) {
   text-transform: uppercase;
   letter-spacing: 0.08em;
   margin-bottom: 4px;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "Lapsus Pro", "Inter", sans-serif;
 }
 
 .modal-image {
@@ -742,7 +751,7 @@ button:hover:not(:disabled) {
   font-size: 12px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "Lapsus Pro", "Inter", sans-serif;
 }
 
 .toggle.active {
@@ -762,7 +771,7 @@ button:hover:not(:disabled) {
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--muted);
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "Lapsus Pro", "Inter", sans-serif;
 }
 
 .multi-input {
@@ -893,7 +902,7 @@ button:hover:not(:disabled) {
   font-size: 13px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "Lapsus Pro", "Inter", sans-serif;
   box-shadow: 0 12px 24px rgba(0, 0, 0, 0.08);
 }
 
@@ -1021,7 +1030,7 @@ button:hover:not(:disabled) {
   text-transform: uppercase;
   font-size: 12px;
   letter-spacing: 0.08em;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "Lapsus Pro", "Inter", sans-serif;
   background: var(--panel-2);
   color: var(--ink);
 }
