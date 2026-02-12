@@ -1,0 +1,13 @@
+{
+  "/_not-found/page": "/_not-found",
+  "/api/health/route": "/api/health",
+  "/api/meta/route": "/api/meta",
+  "/api/replays/[id]/image/route": "/api/replays/[id]/image",
+  "/api/replays/[id]/route": "/api/replays/[id]",
+  "/api/replays/bulk/route": "/api/replays/bulk",
+  "/api/replays/route": "/api/replays",
+  "/api/stats/route": "/api/stats",
+  "/api/search/route": "/api/search",
+  "/stats/page": "/stats",
+  "/page": "/"
+}

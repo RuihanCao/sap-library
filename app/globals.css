@@ -917,6 +917,41 @@ button:hover:not(:disabled) {
   gap: 16px;
 }
 
+.stats-cards.list-view {
+  grid-template-columns: 1fr;
+}
+
+.stats-cards.list-view .stats-card {
+  grid-template-columns: minmax(220px, 280px) 1fr;
+  gap: 12px 20px;
+  align-items: start;
+}
+
+.stats-cards.list-view .stats-card-head {
+  grid-column: 1;
+}
+
+.stats-cards.list-view .stats-card-meta {
+  grid-column: 1;
+}
+
+.stats-cards.list-view .stats-card-metrics {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 8px 16px;
+  align-content: start;
+}
+
+.stats-cards.list-view .stats-card.empty {
+  grid-template-columns: 1fr;
+}
+
+.stats-cards.list-view .stats-card.empty .stats-card-metrics {
+  grid-column: 1;
+  grid-row: auto;
+}
+
 .stats-card {
   background: rgba(255, 255, 255, 0.82);
   border: 1px solid var(--edge);
@@ -961,6 +996,15 @@ button:hover:not(:disabled) {
   display: grid;
   gap: 6px;
   font-size: 13px;
+}
+
+.view-toggle {
+  display: inline-flex;
+  gap: 8px;
+}
+
+.view-toggle .toggle {
+  margin: 0;
 }
 
 .stats-row {
@@ -1044,6 +1088,15 @@ button:hover:not(:disabled) {
 
   .stats-table.pets.battle .stats-row {
     grid-template-columns: 1.2fr 0.8fr 0.8fr 0.8fr 0.8fr;
+  }
+
+  .stats-cards.list-view .stats-card {
+    grid-template-columns: 1fr;
+  }
+
+  .stats-cards.list-view .stats-card-metrics {
+    grid-column: 1;
+    grid-row: auto;
   }
 }
 

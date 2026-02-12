@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "functions": {
+    "/api/health": {},
+    "/api/meta": {},
+    "/api/replays/[id]/image": {},
+    "/api/replays/[id]": {},
+    "/api/replays/bulk": {},
+    "/api/replays": {},
+    "/api/search": {},
+    "/api/stats": {}
+  }
+}

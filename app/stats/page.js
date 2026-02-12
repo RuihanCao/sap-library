@@ -337,6 +337,7 @@ export default function StatsPage() {
   const [perkOrder, setPerkOrder] = useState("asc");
   const [toySort, setToySort] = useState("name");
   const [toyOrder, setToyOrder] = useState("asc");
+  const [viewMode, setViewMode] = useState("card");
   const [sortMenuOpen, setSortMenuOpen] = useState({
     pet: false,
     perk: false,
@@ -601,6 +602,7 @@ export default function StatsPage() {
       }
     }, toyOrder);
   }, [stats.toyStats, stats.totalGames, toySort, toyOrder]);
+  const statsCardsClass = `stats-cards${viewMode === "list" ? " list-view" : ""}`;
 
   return (
     <main onClick={() => setSortMenuOpen({ pet: false, perk: false, toy: false })}>
@@ -771,8 +773,26 @@ export default function StatsPage() {
       <section className="section">
         <div className="results-header">
           <h2>Summary</h2>
-          <div className="status">
-            {loading ? "Loading..." : `${stats.totalGames} ${filters.scope === "battle" ? "rounds" : "games"}`}
+          <div className="results-actions">
+            <div className="status">
+              {loading ? "Loading..." : `${stats.totalGames} ${filters.scope === "battle" ? "rounds" : "games"}`}
+            </div>
+            <div className="view-toggle">
+              <button
+                type="button"
+                className={`toggle${viewMode === "card" ? " active" : ""}`}
+                onClick={() => setViewMode("card")}
+              >
+                Cards
+              </button>
+              <button
+                type="button"
+                className={`toggle${viewMode === "list" ? " active" : ""}`}
+                onClick={() => setViewMode("list")}
+              >
+                List
+              </button>
+            </div>
           </div>
         </div>
         {!loading && stats.totalGames === 0 && (
@@ -784,7 +804,7 @@ export default function StatsPage() {
         <div className="results-header">
           <h2>Pack Winrates</h2>
         </div>
-        <div className="stats-cards">
+        <div className={statsCardsClass}>
           {sortedPackStats.map((row) => {
             const games = Number(row.games || 0);
             const wins = Number(row.wins || 0);
@@ -853,7 +873,7 @@ export default function StatsPage() {
             )}
           </div>
         </div>
-        <div className="stats-cards">
+        <div className={statsCardsClass}>
           {sortedPetStats.map((row) => {
             const games = Number(stats.totalGames || 0);
             const gamesWith = Number(row.games_with || 0);
@@ -940,7 +960,7 @@ export default function StatsPage() {
             )}
           </div>
         </div>
-        <div className="stats-cards">
+        <div className={statsCardsClass}>
           {sortedPerkStats.map((row) => {
             const games = Number(stats.totalGames || 0);
             const gamesWith = Number(row.games_with || 0);
@@ -1027,7 +1047,7 @@ export default function StatsPage() {
             )}
           </div>
         </div>
-        <div className="stats-cards">
+        <div className={statsCardsClass}>
           {sortedToyStats.map((row) => {
             const games = Number(stats.totalGames || 0);
             const gamesWith = Number(row.games_with || 0);
