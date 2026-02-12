@@ -1083,7 +1083,6 @@ export default function Page() {
                 </div>
               </div>
               <div className="muted">Matchup: {r.pack || "Unknown"} vs {r.opponent_pack || "Unknown"}</div>
-              <div className="muted">Game Type: {(r.match_type || "unknown").toUpperCase()}</div>
               <div className="replay-image-wrap">
                 <img
                   className="replay-image"
