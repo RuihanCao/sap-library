@@ -334,6 +334,7 @@ export default function Page() {
   const [tagSaving, setTagSaving] = useState(false);
   const [tagStatus, setTagStatus] = useState("");
   const [showTagEditor, setShowTagEditor] = useState(false);
+  const replayImageVersion = "2026-02-12-text-fix";
 
   useEffect(() => {
     if (!BUILD_BACKGROUNDS.length) return;
@@ -1086,7 +1087,7 @@ export default function Page() {
               <div className="replay-image-wrap">
                 <img
                   className="replay-image"
-                  src={`/api/replays/${r.id}/image`}
+                  src={`/api/replays/${r.id}/image?v=${encodeURIComponent(r.created_at || replayImageVersion)}`}
                   alt="Replay"
                   onLoad={(e) => e.currentTarget.closest(".replay-image-wrap")?.classList.add("loaded")}
                   onError={(e) => e.currentTarget.closest(".replay-image-wrap")?.classList.add("loaded")}
@@ -1177,7 +1178,11 @@ export default function Page() {
                     </div>
                   )}
                 </div>
-                <img className="modal-image" src={`/api/replays/${modalData.replay.id}/image`} alt="Replay" />
+                <img
+                  className="modal-image"
+                  src={`/api/replays/${modalData.replay.id}/image?v=${encodeURIComponent(modalData.replay.created_at || replayImageVersion)}`}
+                  alt="Replay"
+                />
               </>
             )}
           </div>
