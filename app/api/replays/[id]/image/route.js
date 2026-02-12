@@ -1,14 +1,23 @@
-﻿import { NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { pool } from "@/lib/db";
 const { renderReplayImage } = require("@/lib/render");
 const { getBattleInfo } = require("@/lib/battle");
+const { setAssetBaseUrl } = require("@/lib/config");
 
 export const runtime = "nodejs";
 
 export async function GET(req, context) {
+  try {
+    const requestUrl = new URL(req.url);
+    setAssetBaseUrl(requestUrl.origin);
+  } catch {
+    // ignore
+  }
+
   const params = context?.params ? await context.params : null;
   const idFromParams = params?.id;
   let id = idFromParams;
+
   if (!id) {
     try {
       const url = new URL(req.url);
@@ -21,6 +30,7 @@ export async function GET(req, context) {
       // ignore
     }
   }
+
   if (!id) {
     return NextResponse.json({ error: "missing id" }, { status: 400 });
   }
@@ -32,6 +42,7 @@ export async function GET(req, context) {
 
   const replay = rows[0].raw_json;
   let maxLives = 5;
+
   if (replay?.GenesisModeModel) {
     try {
       const model = JSON.parse(replay.GenesisModeModel);
@@ -42,8 +53,11 @@ export async function GET(req, context) {
       // ignore
     }
   }
+
   const actions = replay.Actions || [];
-  const battles = actions.filter((a) => a.Type === 0).map((a) => JSON.parse(a.Battle));
+  const battles = actions
+    .filter((a) => a.Type === 0)
+    .map((a) => JSON.parse(a.Battle));
   const battleOpponentInfo = actions
     .filter((a) => a.Type === 1)
     .map((a) => JSON.parse(a.Mode).Opponents);
@@ -52,20 +66,25 @@ export async function GET(req, context) {
   const playerName = battles[0]?.User?.DisplayName || null;
   const headerOpponentName = parsedBattles[0]?.opponentName || null;
 
-  const imageBuffer = await renderReplayImage({
-    battles: parsedBattles,
-    battleOpponentInfo,
-    maxLives,
-    includeOdds: false,
-    winPercentResults: [],
-    playerName,
-    headerOpponentName
-  });
+  try {
+    const imageBuffer = await renderReplayImage({
+      battles: parsedBattles,
+      battleOpponentInfo,
+      maxLives,
+      includeOdds: false,
+      winPercentResults: [],
+      playerName,
+      headerOpponentName
+    });
 
-  return new NextResponse(imageBuffer, {
-    headers: {
-      "Content-Type": "image/png",
-      "Cache-Control": "public, max-age=31536000, immutable"
-    }
-  });
+    return new NextResponse(imageBuffer, {
+      headers: {
+        "Content-Type": "image/png",
+        "Cache-Control": "public, max-age=31536000, immutable"
+      }
+    });
+  } catch (err) {
+    console.error("Replay image render failed", { id, error: err?.message || err });
+    return NextResponse.json({ error: "failed to render image" }, { status: 500 });
+  }
 }
