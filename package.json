@@ -11,7 +11,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "canvas": "^3.1.2",
+    "@napi-rs/canvas": "^0.1.92",
     "dotenv": "^17.2.0",
     "next": "^15.1.6",
     "pg": "^8.11.5",
