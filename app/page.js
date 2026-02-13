@@ -834,6 +834,20 @@ export default function Page() {
     }
   }
 
+  async function copyReplayJsonCode() {
+    const participationId = modalData?.replay?.participation_id;
+    if (!participationId) return;
+    try {
+      const payload = JSON.stringify({ T: 1, Pid: participationId });
+      await navigator.clipboard.writeText(payload);
+      setModalShareStatus("Replay code copied.");
+      setTimeout(() => setModalShareStatus(""), 1400);
+    } catch {
+      setModalShareStatus("Could not copy replay code.");
+      setTimeout(() => setModalShareStatus(""), 1400);
+    }
+  }
+
   function applyExplorePreset(name) {
     const nextFilters = {
       ...DEFAULT_FILTERS,
@@ -1602,6 +1616,7 @@ export default function Page() {
               <h3>Replay Details</h3>
               <div className="modal-head-actions">
                 <button className="ghost" type="button" onClick={copyReplayShareLink}>Share</button>
+                <button className="ghost" type="button" onClick={copyReplayJsonCode}>Copy Replay Code</button>
                 <button className="ghost" type="button" onClick={closeModal}>Close</button>
               </div>
             </div>
