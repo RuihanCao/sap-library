@@ -18,6 +18,16 @@ export async function GET(req) {
   const { searchParams } = new URL(req.url);
   const pack = searchParams.get("pack") || "";
   const opponentPack = searchParams.get("opponentPack") || "";
+  const player = searchParams.get("player") || "";
+  const playerId = searchParams.get("playerId") || "";
+  const minTurnRaw = searchParams.get("minTurn");
+  const maxTurnRaw = searchParams.get("maxTurn");
+  const minTurn = minTurnRaw !== null && minTurnRaw !== "" && Number.isFinite(Number(minTurnRaw))
+    ? Number(minTurnRaw)
+    : null;
+  const maxTurn = maxTurnRaw !== null && maxTurnRaw !== "" && Number.isFinite(Number(maxTurnRaw))
+    ? Number(maxTurnRaw)
+    : null;
   const pet = parseList(searchParams.get("pet"));
   const petLevel = searchParams.get("petLevel") || "";
   const perk = parseList(searchParams.get("perk"));
@@ -32,6 +42,9 @@ export async function GET(req) {
   const tags = parseList(searchParams.get("tags"));
 
   const values = [];
+  let playerNameIndex = null;
+  let playerIdExactIndex = null;
+  let playerIdLikeIndex = null;
   const clauses = [
     `r.match_type != 'arena'`,
     `r.pack is not null`,
@@ -48,6 +61,17 @@ export async function GET(req) {
   if (opponentPack) {
     values.push(opponentPack);
     clauses.push(`r.opponent_pack = $${values.length}`);
+  }
+  if (player) {
+    values.push(`%${player}%`);
+    playerNameIndex = values.length;
+    clauses.push(`(r.player_name ilike $${playerNameIndex} or r.opponent_name ilike $${playerNameIndex})`);
+  }
+  if (playerId) {
+    values.push(playerId, `%${playerId}%`);
+    playerIdExactIndex = values.length - 1;
+    playerIdLikeIndex = values.length;
+    clauses.push(`((r.raw_json->>'UserId') = $${playerIdExactIndex} or coalesce(r.raw_json->>'GenesisModeModel', '') ilike $${playerIdLikeIndex})`);
   }
   if (tags.length) {
     values.push(tags);
@@ -96,10 +120,42 @@ export async function GET(req) {
   const opponentToyTurnFilter = opponentToy.length
     ? "and exists (select 1 from pets ap where ap.replay_id = t.replay_id and ap.turn_number = t.turn_number and ap.side = 'opponent' and ap.toy = any($OPP_TOY))"
     : "";
+  const battleTurnMinClause = minTurn !== null ? "and t.turn_number >= $MIN_TURN" : "";
+  const battleTurnMaxClause = maxTurn !== null ? "and t.turn_number <= $MAX_TURN" : "";
+
+  const includePlayerSideExprParts = [];
+  const includeOpponentSideExprParts = [];
+  if (playerNameIndex !== null) {
+    includePlayerSideExprParts.push(`r.player_name ilike $${playerNameIndex}`);
+    includeOpponentSideExprParts.push(`r.opponent_name ilike $${playerNameIndex}`);
+  }
+  if (playerIdExactIndex !== null) {
+    includePlayerSideExprParts.push(`(r.raw_json->>'UserId') = $${playerIdExactIndex}`);
+  }
+  if (playerIdLikeIndex !== null) {
+    includeOpponentSideExprParts.push(`coalesce(r.raw_json->>'GenesisModeModel', '') ilike $${playerIdLikeIndex}`);
+  }
+
+  const includePlayerSideExpr = includePlayerSideExprParts.length
+    ? includePlayerSideExprParts.join(" and ")
+    : "true";
+  const includeOpponentSideExpr = includeOpponentSideExprParts.length
+    ? includeOpponentSideExprParts.join(" and ")
+    : "true";
+
+  if (playerNameIndex !== null || playerIdExactIndex !== null || playerIdLikeIndex !== null) {
+    clauses.push(`((${includePlayerSideExpr}) or (${includeOpponentSideExpr}))`);
+  }
 
   const baseSql = `
     with base as (
-      select r.id, r.pack, r.opponent_pack
+      select
+        r.id,
+        r.pack,
+        r.opponent_pack,
+        r.created_at,
+        (${includePlayerSideExpr}) as include_player_side,
+        (${includeOpponentSideExpr}) as include_opponent_side
       from replays r
       where ${clauses.join(" and ")}
       ${allyPetFilter}
@@ -235,6 +291,7 @@ export async function GET(req) {
         'player'::text as side
       from base b
       join outcomes o on o.replay_id = b.id
+      where b.include_player_side
       union all
       select
         b.id,
@@ -243,16 +300,29 @@ export async function GET(req) {
         'opponent'::text as side
       from base b
       join outcomes o on o.replay_id = b.id
+      where b.include_opponent_side
     ),
     combined_pet_any as (
-      select id, pet_name, 'player'::text as side from pet_any
+      select pa.id, pa.pet_name, 'player'::text as side
+      from pet_any pa
+      join base b on b.id = pa.id
+      where b.include_player_side
       union all
-      select id, pet_name, 'opponent'::text as side from opp_pet_any
+      select pa.id, pa.pet_name, 'opponent'::text as side
+      from opp_pet_any pa
+      join base b on b.id = pa.id
+      where b.include_opponent_side
     ),
     combined_pet_end as (
-      select id, pet_name, 'player'::text as side from pet_end
+      select pe.id, pe.pet_name, 'player'::text as side
+      from pet_end pe
+      join base b on b.id = pe.id
+      where b.include_player_side
       union all
-      select id, pet_name, 'opponent'::text as side from opp_pet_end
+      select pe.id, pe.pet_name, 'opponent'::text as side
+      from opp_pet_end pe
+      join base b on b.id = pe.id
+      where b.include_opponent_side
     ),
     combined_pet_list as (
       select distinct pet_name from combined_pet_any
@@ -260,14 +330,26 @@ export async function GET(req) {
       select distinct pet_name from combined_pet_end
     ),
     combined_perk_any as (
-      select id, perk_name, 'player'::text as side from perk_any
+      select pa.id, pa.perk_name, 'player'::text as side
+      from perk_any pa
+      join base b on b.id = pa.id
+      where b.include_player_side
       union all
-      select id, perk_name, 'opponent'::text as side from opp_perk_any
+      select pa.id, pa.perk_name, 'opponent'::text as side
+      from opp_perk_any pa
+      join base b on b.id = pa.id
+      where b.include_opponent_side
     ),
     combined_perk_end as (
-      select id, perk_name, 'player'::text as side from perk_end
+      select pe.id, pe.perk_name, 'player'::text as side
+      from perk_end pe
+      join base b on b.id = pe.id
+      where b.include_player_side
       union all
-      select id, perk_name, 'opponent'::text as side from opp_perk_end
+      select pe.id, pe.perk_name, 'opponent'::text as side
+      from opp_perk_end pe
+      join base b on b.id = pe.id
+      where b.include_opponent_side
     ),
     combined_perk_list as (
       select distinct perk_name from combined_perk_any
@@ -275,14 +357,26 @@ export async function GET(req) {
       select distinct perk_name from combined_perk_end
     ),
     combined_toy_any as (
-      select id, toy_name, 'player'::text as side from toy_any
+      select ta.id, ta.toy_name, 'player'::text as side
+      from toy_any ta
+      join base b on b.id = ta.id
+      where b.include_player_side
       union all
-      select id, toy_name, 'opponent'::text as side from opp_toy_any
+      select ta.id, ta.toy_name, 'opponent'::text as side
+      from opp_toy_any ta
+      join base b on b.id = ta.id
+      where b.include_opponent_side
     ),
     combined_toy_end as (
-      select id, toy_name, 'player'::text as side from toy_end
+      select te.id, te.toy_name, 'player'::text as side
+      from toy_end te
+      join base b on b.id = te.id
+      where b.include_player_side
       union all
-      select id, toy_name, 'opponent'::text as side from opp_toy_end
+      select te.id, te.toy_name, 'opponent'::text as side
+      from opp_toy_end te
+      join base b on b.id = te.id
+      where b.include_opponent_side
     ),
     combined_toy_list as (
       select distinct toy_name from combined_toy_any
@@ -291,6 +385,8 @@ export async function GET(req) {
     )
     select
       (select count(*) from base) as total_games,
+      (select count(*) from turns t join base b on b.id = t.replay_id) as total_battles,
+      (select max(created_at) from base) as newest_entry_at,
       (select coalesce(json_agg(row_to_json(cps)), '[]'::json) from (
         select
           cp.pack as pack,
@@ -360,7 +456,13 @@ export async function GET(req) {
 
   const battleSql = `
     with base as (
-      select r.id, r.pack, r.opponent_pack
+      select
+        r.id,
+        r.pack,
+        r.opponent_pack,
+        r.created_at,
+        (${includePlayerSideExpr}) as include_player_side,
+        (${includeOpponentSideExpr}) as include_opponent_side
       from replays r
       where ${clauses.join(" and ")}
     ),
@@ -369,6 +471,8 @@ export async function GET(req) {
       from turns t
       join base b on b.id = t.replay_id
       where 1=1
+      ${battleTurnMinClause}
+      ${battleTurnMaxClause}
       ${allyPetTurnFilter}
       ${opponentPetTurnFilter}
       ${allyPerkTurnFilter}
@@ -380,10 +484,12 @@ export async function GET(req) {
       select tb.turn_id, b.pack as pack, 'player'::text as side, tb.outcome
       from turns_base tb
       join base b on b.id = tb.replay_id
+      where b.include_player_side
       union all
       select tb.turn_id, b.opponent_pack as pack, 'opponent'::text as side, tb.outcome
       from turns_base tb
       join base b on b.id = tb.replay_id
+      where b.include_opponent_side
     ),
     pet_rounds as (
       select
@@ -393,7 +499,9 @@ export async function GET(req) {
         p.side
       from turns_base tb
       join pets p on p.replay_id = tb.replay_id and p.turn_number = tb.turn_number
+      join base b on b.id = tb.replay_id
       where p.pet_name is not null ${petClause} ${petLevelClause}
+      and ((p.side = 'player' and b.include_player_side) or (p.side = 'opponent' and b.include_opponent_side))
       group by tb.turn_id, p.pet_name, tb.outcome, p.side
     ),
     perk_rounds as (
@@ -404,7 +512,9 @@ export async function GET(req) {
         p.side
       from turns_base tb
       join pets p on p.replay_id = tb.replay_id and p.turn_number = tb.turn_number
+      join base b on b.id = tb.replay_id
       where p.perk is not null ${perkClause}
+      and ((p.side = 'player' and b.include_player_side) or (p.side = 'opponent' and b.include_opponent_side))
       group by tb.turn_id, p.perk, tb.outcome, p.side
     ),
     toy_rounds as (
@@ -415,11 +525,15 @@ export async function GET(req) {
         p.side
       from turns_base tb
       join pets p on p.replay_id = tb.replay_id and p.turn_number = tb.turn_number
+      join base b on b.id = tb.replay_id
       where p.toy is not null ${toyClause}
+      and ((p.side = 'player' and b.include_player_side) or (p.side = 'opponent' and b.include_opponent_side))
       group by tb.turn_id, p.toy, tb.outcome, p.side
     )
     select
       (select count(*) from turns_base) as total_games,
+      (select count(*) from turns_base) as total_battles,
+      (select max(created_at) from base) as newest_entry_at,
       (select coalesce(json_agg(row_to_json(cps)), '[]'::json) from (
         select
           pr.pack as pack,
@@ -532,6 +646,21 @@ export async function GET(req) {
   bindToken("$OPP_PERK", opponentPerk.length ? opponentPerk : null);
   bindToken("$ALLY_TOY", allyToy.length ? allyToy : null);
   bindToken("$OPP_TOY", opponentToy.length ? opponentToy : null);
+  if (minTurn !== null) {
+    const minTurnIndex = finalValues.length + 1;
+    sql = sql.replace(/\$MIN_TURN/g, `$${minTurnIndex}`);
+    finalValues.push(minTurn);
+  } else {
+    sql = sql.replace(/and t\.turn_number >= \$MIN_TURN/g, "");
+  }
+
+  if (maxTurn !== null) {
+    const maxTurnIndex = finalValues.length + 1;
+    sql = sql.replace(/\$MAX_TURN/g, `$${maxTurnIndex}`);
+    finalValues.push(maxTurn);
+  } else {
+    sql = sql.replace(/and t\.turn_number <= \$MAX_TURN/g, "");
+  }
 
 
   const { rows } = await pool.query(sql, finalValues);
@@ -540,6 +669,9 @@ export async function GET(req) {
   return NextResponse.json(
     {
       totalGames: Number(row.total_games || 0),
+      totalBattles: Number(row.total_battles || 0),
+      generatedAt: new Date().toISOString(),
+      newestEntryAt: row.newest_entry_at || null,
       packStats: row.pack_stats || [],
       petStats: row.pet_stats || [],
       perkStats: row.perk_stats || [],

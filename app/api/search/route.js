@@ -15,8 +15,8 @@ function parseList(value) {
 export async function GET(req) {
   const { searchParams } = new URL(req.url);
   const player = searchParams.get("player");
+  const playerId = searchParams.get("playerId");
   const opponent = searchParams.get("opponent");
-  const eitherPlayer = searchParams.get("eitherPlayer") === "true";
   const packA = searchParams.get("packA");
   const packB = searchParams.get("packB");
   const excludeA = searchParams.get("excludeA");
@@ -82,16 +82,18 @@ export async function GET(req) {
 
   if (player) {
     values.push(`%${player}%`);
-    if (eitherPlayer) {
-      clauses.push(`(r.player_name ilike $${values.length} or r.opponent_name ilike $${values.length})`);
-    } else {
-      clauses.push(`r.player_name ilike $${values.length}`);
-    }
+    clauses.push(`(r.player_name ilike $${values.length} or r.opponent_name ilike $${values.length})`);
+  }
+  if (playerId) {
+    values.push(playerId, `%${playerId}%`);
+    const exactIdx = values.length - 1;
+    const likeIdx = values.length;
+    clauses.push(`((r.raw_json->>'UserId') = $${exactIdx} or coalesce(r.raw_json->>'GenesisModeModel', '') ilike $${likeIdx})`);
   }
 
   if (opponent) {
     values.push(`%${opponent}%`);
-    clauses.push(`r.opponent_name ilike $${values.length}`);
+    clauses.push(`(r.player_name ilike $${values.length} or r.opponent_name ilike $${values.length})`);
   }
 
   if (packA && packB) {

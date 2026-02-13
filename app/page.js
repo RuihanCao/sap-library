@@ -258,6 +258,14 @@ function extractPids(input) {
     .filter(Boolean);
 }
 
+function parseCsvList(value) {
+  if (!value) return [];
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 function getGameTypeIcon(matchType) {
   const type = (matchType || "unknown").toLowerCase();
   if (type === "ranked") return "/Sprite/Cosmetic/CrownHat.png";
@@ -266,9 +274,61 @@ function getGameTypeIcon(matchType) {
   return "/Sprite/Cosmetic/TrophyHat.png";
 }
 
+const DEFAULT_FILTERS = {
+  player: "",
+  playerId: "",
+  opponent: "",
+  packA: "",
+  packB: "",
+  excludeA: "",
+  excludeB: "",
+  mirrorMatch: false,
+  petMode: "any",
+  perkMode: "any",
+  toyMode: "any",
+  matchType: "any",
+  petLevelName: "",
+  petLevelMin: "",
+  exactTeam: "",
+  outcome: "",
+  outcomeTurn: "",
+  minWins: "",
+  goldMin: "",
+  goldMax: "",
+  rollsMin: "",
+  rollsMax: "",
+  summonsMin: "",
+  summonsMax: "",
+  econSide: "either",
+  startDate: "",
+  endDate: "",
+  tags: "",
+  turn: "",
+  sort: "created_at",
+  order: "desc",
+  pageSize: "10"
+};
+
+const DEFAULT_ENABLED = {
+  player: false,
+  matchup: false,
+  pets: false,
+  perks: false,
+  toys: false,
+  turn: false,
+  matchType: false
+};
+
 export default function Page() {
   const [bulkText, setBulkText] = useState("");
   const [ingestStatus, setIngestStatus] = useState("");
+  const [ingestSummary, setIngestSummary] = useState({
+    inserted: 0,
+    skippedParticipation: 0,
+    skippedMatch: 0,
+    failed: 0,
+    failedEntries: []
+  });
   const [bulkProgress, setBulkProgress] = useState({
     total: 0,
     done: 0,
@@ -276,49 +336,8 @@ export default function Page() {
   });
   const [progressPulse, setProgressPulse] = useState(0);
   const [meta, setMeta] = useState({ pets: [], perks: [], toys: [], packs: [] });
-  const [filters, setFilters] = useState({
-    player: "",
-    opponent: "",
-    eitherPlayer: false,
-    packA: "",
-    packB: "",
-    excludeA: "",
-    excludeB: "",
-    mirrorMatch: false,
-    petMode: "any",
-    perkMode: "any",
-    toyMode: "any",
-    matchType: "any",
-    petLevelName: "",
-    petLevelMin: "",
-    exactTeam: "",
-    outcome: "",
-    outcomeTurn: "",
-    minWins: "",
-    goldMin: "",
-    goldMax: "",
-    rollsMin: "",
-    rollsMax: "",
-    summonsMin: "",
-    summonsMax: "",
-    econSide: "either",
-    startDate: "",
-    endDate: "",
-    tags: "",
-    turn: "",
-    sort: "created_at",
-    order: "desc",
-    pageSize: "10"
-  });
-  const [enabled, setEnabled] = useState({
-    player: false,
-    matchup: false,
-    pets: false,
-    perks: false,
-    toys: false,
-    turn: false,
-    matchType: false
-  });
+  const [filters, setFilters] = useState(DEFAULT_FILTERS);
+  const [enabled, setEnabled] = useState(DEFAULT_ENABLED);
   const [advancedEnabled, setAdvancedEnabled] = useState(false);
   const [showSortMenu, setShowSortMenu] = useState(false);
   const [selectedPets, setSelectedPets] = useState([]);
@@ -334,6 +353,7 @@ export default function Page() {
   const [tagSaving, setTagSaving] = useState(false);
   const [tagStatus, setTagStatus] = useState("");
   const [showTagEditor, setShowTagEditor] = useState(false);
+  const [shareStatus, setShareStatus] = useState("");
   const replayImageVersion = "2026-02-12-text-fix";
 
   useEffect(() => {
@@ -352,10 +372,6 @@ export default function Page() {
       .then((res) => res.json())
       .then((data) => setMeta(data))
       .catch(() => setMeta({ pets: [], perks: [], toys: [], packs: [] }));
-  }, []);
-
-  useEffect(() => {
-    runSearch(null, 1);
   }, []);
 
   useEffect(() => {
@@ -382,12 +398,201 @@ export default function Page() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
+  function buildSearchParams({
+    filtersValue = filters,
+    enabledValue = enabled,
+    selectedPetsValue = selectedPets,
+    selectedPerksValue = selectedPerks,
+    selectedToysValue = selectedToys,
+    advancedEnabledValue = advancedEnabled,
+    pageValue = 1
+  } = {}) {
+    const params = new URLSearchParams();
+    if (enabledValue.player) {
+      if (filtersValue.player) params.set("player", filtersValue.player);
+      if (filtersValue.playerId) params.set("playerId", filtersValue.playerId);
+      if (filtersValue.opponent) params.set("opponent", filtersValue.opponent);
+    }
+    if (enabledValue.matchup) {
+      if (filtersValue.packA) params.set("packA", filtersValue.packA);
+      if (filtersValue.packB) params.set("packB", filtersValue.packB);
+      if (filtersValue.mirrorMatch) params.set("mirrorMatch", "true");
+    }
+    if (enabledValue.pets) {
+      if (selectedPetsValue.length) params.set("pet", selectedPetsValue.join(","));
+      params.set("petMode", filtersValue.petMode);
+    }
+    if (enabledValue.perks) {
+      if (selectedPerksValue.length) params.set("perk", selectedPerksValue.join(","));
+      params.set("perkMode", filtersValue.perkMode);
+    }
+    if (enabledValue.toys) {
+      if (selectedToysValue.length) params.set("toy", selectedToysValue.join(","));
+      params.set("toyMode", filtersValue.toyMode);
+    }
+    if (enabledValue.turn && filtersValue.turn) params.set("turn", filtersValue.turn);
+    if (enabledValue.matchType && filtersValue.matchType && filtersValue.matchType !== "any") {
+      params.set("matchType", filtersValue.matchType);
+    }
+
+    if (advancedEnabledValue) {
+      if (filtersValue.excludeA) params.set("excludeA", filtersValue.excludeA);
+      if (filtersValue.excludeB) params.set("excludeB", filtersValue.excludeB);
+      if (filtersValue.petLevelName) params.set("petLevelName", filtersValue.petLevelName);
+      if (filtersValue.petLevelMin) params.set("petLevelMin", filtersValue.petLevelMin);
+      if (filtersValue.exactTeam) params.set("exactTeam", filtersValue.exactTeam);
+      if (filtersValue.outcome) params.set("outcome", filtersValue.outcome);
+      if (filtersValue.outcomeTurn) params.set("outcomeTurn", filtersValue.outcomeTurn);
+      if (filtersValue.minWins) params.set("minWins", filtersValue.minWins);
+      if (filtersValue.goldMin) params.set("goldMin", filtersValue.goldMin);
+      if (filtersValue.goldMax) params.set("goldMax", filtersValue.goldMax);
+      if (filtersValue.rollsMin) params.set("rollsMin", filtersValue.rollsMin);
+      if (filtersValue.rollsMax) params.set("rollsMax", filtersValue.rollsMax);
+      if (filtersValue.summonsMin) params.set("summonsMin", filtersValue.summonsMin);
+      if (filtersValue.summonsMax) params.set("summonsMax", filtersValue.summonsMax);
+      if (filtersValue.econSide) params.set("econSide", filtersValue.econSide);
+      if (filtersValue.startDate) params.set("startDate", filtersValue.startDate);
+      if (filtersValue.endDate) params.set("endDate", filtersValue.endDate);
+      if (filtersValue.tags) params.set("tags", filtersValue.tags);
+    }
+
+    params.set("page", String(pageValue));
+    params.set("pageSize", String(filtersValue.pageSize || "10"));
+    params.set("sort", filtersValue.sort || "created_at");
+    params.set("order", filtersValue.order || "desc");
+
+    const enabledKeys = Object.entries(enabledValue)
+      .filter(([, isOn]) => Boolean(isOn))
+      .map(([key]) => key);
+    if (enabledKeys.length) params.set("uiEnabled", enabledKeys.join(","));
+    if (advancedEnabledValue) params.set("uiAdvanced", "1");
+
+    return params;
+  }
+
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const hasQuery = Array.from(urlParams.keys()).length > 0;
+
+    if (!hasQuery) {
+      runSearch(null, 1);
+      return;
+    }
+
+    const nextFilters = { ...DEFAULT_FILTERS };
+    const nextEnabled = { ...DEFAULT_ENABLED };
+
+    const assignText = (key) => {
+      const value = urlParams.get(key);
+      if (value !== null) nextFilters[key] = value;
+    };
+
+    assignText("player");
+    assignText("playerId");
+    assignText("opponent");
+    assignText("packA");
+    assignText("packB");
+    assignText("excludeA");
+    assignText("excludeB");
+    assignText("petMode");
+    assignText("perkMode");
+    assignText("toyMode");
+    assignText("matchType");
+    assignText("petLevelName");
+    assignText("petLevelMin");
+    assignText("exactTeam");
+    assignText("outcome");
+    assignText("outcomeTurn");
+    assignText("minWins");
+    assignText("goldMin");
+    assignText("goldMax");
+    assignText("rollsMin");
+    assignText("rollsMax");
+    assignText("summonsMin");
+    assignText("summonsMax");
+    assignText("econSide");
+    assignText("startDate");
+    assignText("endDate");
+    assignText("tags");
+    assignText("turn");
+    assignText("sort");
+    assignText("order");
+    assignText("pageSize");
+
+    nextFilters.mirrorMatch = urlParams.get("mirrorMatch") === "true";
+
+    const nextSelectedPets = parseCsvList(urlParams.get("pet"));
+    const nextSelectedPerks = parseCsvList(urlParams.get("perk"));
+    const nextSelectedToys = parseCsvList(urlParams.get("toy"));
+
+    const uiEnabled = parseCsvList(urlParams.get("uiEnabled"));
+    if (uiEnabled.length) {
+      for (const key of uiEnabled) {
+        if (key in nextEnabled) nextEnabled[key] = true;
+      }
+    } else {
+      nextEnabled.player = Boolean(nextFilters.player || nextFilters.playerId || nextFilters.opponent);
+      nextEnabled.matchup = Boolean(nextFilters.packA || nextFilters.packB || nextFilters.mirrorMatch);
+      nextEnabled.pets = Boolean(nextSelectedPets.length);
+      nextEnabled.perks = Boolean(nextSelectedPerks.length);
+      nextEnabled.toys = Boolean(nextSelectedToys.length);
+      nextEnabled.turn = Boolean(nextFilters.turn);
+      nextEnabled.matchType = Boolean(nextFilters.matchType && nextFilters.matchType !== "any");
+    }
+    if (nextFilters.mirrorMatch) {
+      nextEnabled.matchup = true;
+    }
+
+    const nextAdvancedEnabled =
+      urlParams.get("uiAdvanced") === "1" ||
+      Boolean(
+        nextFilters.excludeA ||
+          nextFilters.excludeB ||
+          nextFilters.petLevelName ||
+          nextFilters.petLevelMin ||
+          nextFilters.exactTeam ||
+          nextFilters.outcome ||
+          nextFilters.outcomeTurn ||
+          nextFilters.minWins ||
+          nextFilters.goldMin ||
+          nextFilters.goldMax ||
+          nextFilters.rollsMin ||
+          nextFilters.rollsMax ||
+          nextFilters.summonsMin ||
+          nextFilters.summonsMax ||
+          nextFilters.startDate ||
+          nextFilters.endDate ||
+          nextFilters.tags
+      );
+
+    const nextPage = Math.max(1, Number(urlParams.get("page") || 1) || 1);
+
+    setFilters(nextFilters);
+    setEnabled(nextEnabled);
+    setAdvancedEnabled(nextAdvancedEnabled);
+    setSelectedPets(nextSelectedPets);
+    setSelectedPerks(nextSelectedPerks);
+    setSelectedToys(nextSelectedToys);
+
+    const hydratedParams = buildSearchParams({
+      filtersValue: nextFilters,
+      enabledValue: nextEnabled,
+      selectedPetsValue: nextSelectedPets,
+      selectedPerksValue: nextSelectedPerks,
+      selectedToysValue: nextSelectedToys,
+      advancedEnabledValue: nextAdvancedEnabled,
+      pageValue: nextPage
+    });
+
+    runSearch(null, nextPage, { paramsOverride: hydratedParams, skipUrlSync: true });
+  }, []);
+
   function toggleFilter(key) {
     setEnabled((prev) => {
       const next = { ...prev, [key]: !prev[key] };
       if (!next[key]) {
-        if (key === "player") setFilters((f) => ({ ...f, player: "", opponent: "", eitherPlayer: false }));
-        if (key === "matchup") setFilters((f) => ({ ...f, packA: "", packB: "" }));
+        if (key === "player") setFilters((f) => ({ ...f, player: "", playerId: "", opponent: "" }));
+        if (key === "matchup") setFilters((f) => ({ ...f, packA: "", packB: "", mirrorMatch: false }));
         if (key === "pets") setSelectedPets([]);
         if (key === "perks") setSelectedPerks([]);
         if (key === "toys") setSelectedToys([]);
@@ -399,60 +604,56 @@ export default function Page() {
   }
 
   function clearAllFilters() {
-    setEnabled({ player: false, matchup: false, pets: false, perks: false, toys: false, turn: false, matchType: false });
+    const resetFilters = { ...DEFAULT_FILTERS };
+    const resetEnabled = { ...DEFAULT_ENABLED };
+    setEnabled(resetEnabled);
     setAdvancedEnabled(false);
-    setFilters((f) => ({
-      ...f,
-      player: "",
-      opponent: "",
-      eitherPlayer: false,
-      packA: "",
-      packB: "",
-      excludeA: "",
-      excludeB: "",
-      mirrorMatch: false,
-      petMode: "any",
-      perkMode: "any",
-      toyMode: "any",
-      matchType: "any",
-      petLevelName: "",
-      petLevelMin: "",
-      exactTeam: "",
-      outcome: "",
-      outcomeTurn: "",
-      minWins: "",
-      goldMin: "",
-      goldMax: "",
-      rollsMin: "",
-      rollsMax: "",
-      summonsMin: "",
-      summonsMax: "",
-      econSide: "either",
-      startDate: "",
-      endDate: "",
-      tags: "",
-      turn: ""
-    }));
+    setFilters(resetFilters);
     setSelectedPets([]);
     setSelectedPerks([]);
     setSelectedToys([]);
-    runSearch(null, 1);
+    const params = buildSearchParams({
+      filtersValue: resetFilters,
+      enabledValue: resetEnabled,
+      selectedPetsValue: [],
+      selectedPerksValue: [],
+      selectedToysValue: [],
+      advancedEnabledValue: false,
+      pageValue: 1
+    });
+    runSearch(null, 1, { paramsOverride: params });
   }
 
-  async function ingestBulk(e) {
+  async function ingestBulk(e, idsOverride = null) {
     if (e) e.preventDefault();
-    const ids = extractPids(bulkText);
+    const ids = Array.isArray(idsOverride) ? idsOverride : extractPids(bulkText);
     if (!ids.length) {
       setIngestStatus("No participation IDs found.");
+      setIngestSummary({
+        inserted: 0,
+        skippedParticipation: 0,
+        skippedMatch: 0,
+        failed: 0,
+        failedEntries: []
+      });
       return;
     }
 
     setBulkProgress({ total: ids.length, done: 0, active: true });
     setIngestStatus(`Uploading ${ids.length}...`);
+    setIngestSummary({
+      inserted: 0,
+      skippedParticipation: 0,
+      skippedMatch: 0,
+      failed: 0,
+      failedEntries: []
+    });
 
     let inserted = 0;
-    let skipped = 0;
+    let skippedParticipation = 0;
+    let skippedMatch = 0;
     let failed = 0;
+    const failedEntries = [];
     let processed = 0;
 
     for (const id of ids) {
@@ -461,11 +662,17 @@ export default function Page() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ participationId: id })
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         failed += 1;
-      } else if (data.status === "exists") {
-        skipped += 1;
+        failedEntries.push({
+          participationId: id,
+          reason: data?.error || `HTTP ${res.status}`
+        });
+      } else if (data.status === "exists_participation") {
+        skippedParticipation += 1;
+      } else if (data.status === "exists_match") {
+        skippedMatch += 1;
       } else {
         inserted += 1;
       }
@@ -473,75 +680,107 @@ export default function Page() {
       setBulkProgress({ total: ids.length, done: processed, active: true });
     }
 
-    setIngestStatus(`Uploaded ${inserted}, skipped ${skipped}, failed ${failed}`);
+    setIngestStatus(
+      `Uploaded ${inserted}, skipped by PID ${skippedParticipation}, skipped by Game ID ${skippedMatch}, failed ${failed}`
+    );
+    setIngestSummary({
+      inserted,
+      skippedParticipation,
+      skippedMatch,
+      failed,
+      failedEntries
+    });
     setBulkProgress({ total: ids.length, done: ids.length, active: false });
     runSearch(null, 1);
   }
 
-  async function runSearch(e, pageOverride) {
+  async function retryFailedUploads() {
+    if (!ingestSummary.failedEntries.length) return;
+    const failedIds = ingestSummary.failedEntries.map((item) => item.participationId);
+    setBulkText(failedIds.join("\n"));
+    await ingestBulk(null, failedIds);
+  }
+
+  async function runSearch(e, pageOverride, options = {}) {
     if (e) e.preventDefault();
     const pageValue = pageOverride || 1;
+    const params = options.paramsOverride
+      ? new URLSearchParams(options.paramsOverride.toString())
+      : buildSearchParams({ pageValue });
 
-    const params = new URLSearchParams();
-    if (enabled.player) {
-      if (filters.player) params.set("player", filters.player);
-      if (filters.opponent) params.set("opponent", filters.opponent);
-      if (filters.eitherPlayer) params.set("eitherPlayer", "true");
-    }
-    if (enabled.matchup) {
-      if (filters.packA) params.set("packA", filters.packA);
-      if (filters.packB) params.set("packB", filters.packB);
-    }
-    if (enabled.pets) {
-      if (selectedPets.length) params.set("pet", selectedPets.join(","));
-      params.set("petMode", filters.petMode);
-    }
-    if (enabled.perks) {
-      if (selectedPerks.length) params.set("perk", selectedPerks.join(","));
-      params.set("perkMode", filters.perkMode);
-    }
-    if (enabled.toys) {
-      if (selectedToys.length) params.set("toy", selectedToys.join(","));
-      params.set("toyMode", filters.toyMode);
-    }
-    if (enabled.turn && filters.turn) params.set("turn", filters.turn);
-    if (enabled.matchType && filters.matchType && filters.matchType !== "any") {
-      params.set("matchType", filters.matchType);
-    }
-
-    if (advancedEnabled) {
-      if (filters.excludeA) params.set("excludeA", filters.excludeA);
-      if (filters.excludeB) params.set("excludeB", filters.excludeB);
-      if (filters.mirrorMatch) params.set("mirrorMatch", "true");
-      if (filters.petLevelName) params.set("petLevelName", filters.petLevelName);
-      if (filters.petLevelMin) params.set("petLevelMin", filters.petLevelMin);
-      if (filters.exactTeam) params.set("exactTeam", filters.exactTeam);
-      if (filters.outcome) params.set("outcome", filters.outcome);
-      if (filters.outcomeTurn) params.set("outcomeTurn", filters.outcomeTurn);
-      if (filters.minWins) params.set("minWins", filters.minWins);
-      if (filters.goldMin) params.set("goldMin", filters.goldMin);
-      if (filters.goldMax) params.set("goldMax", filters.goldMax);
-      if (filters.rollsMin) params.set("rollsMin", filters.rollsMin);
-      if (filters.rollsMax) params.set("rollsMax", filters.rollsMax);
-      if (filters.summonsMin) params.set("summonsMin", filters.summonsMin);
-      if (filters.summonsMax) params.set("summonsMax", filters.summonsMax);
-      if (filters.econSide) params.set("econSide", filters.econSide);
-      if (filters.startDate) params.set("startDate", filters.startDate);
-      if (filters.endDate) params.set("endDate", filters.endDate);
-      if (filters.tags) params.set("tags", filters.tags);
-    }
-
-    params.set("page", String(pageValue));
-    params.set("pageSize", String(filters.pageSize || "10"));
-    params.set("sort", filters.sort);
-    params.set("order", filters.order);
-
+    if (!params.get("page")) params.set("page", String(pageValue));
     const res = await fetch(`/api/search?${params.toString()}`);
     const data = await res.json();
 
     setResults(data.results || []);
     setTotal(data.total || 0);
     setPage(data.page || pageValue);
+
+    if (!options.skipUrlSync) {
+      const nextUrl = params.toString() ? `?${params.toString()}` : window.location.pathname;
+      window.history.replaceState({}, "", nextUrl);
+    }
+  }
+
+  async function copyShareLink() {
+    try {
+      const href = window.location.href;
+      await navigator.clipboard.writeText(href);
+      setShareStatus("Link copied.");
+      setTimeout(() => setShareStatus(""), 1400);
+    } catch {
+      setShareStatus("Could not copy link.");
+      setTimeout(() => setShareStatus(""), 1400);
+    }
+  }
+
+  function applyExplorePreset(name) {
+    const nextFilters = {
+      ...DEFAULT_FILTERS,
+      sort: filters.sort,
+      order: filters.order,
+      pageSize: filters.pageSize || "10"
+    };
+    const nextEnabled = { ...DEFAULT_ENABLED };
+    let nextAdvanced = false;
+
+    if (name === "ranked") {
+      nextEnabled.matchType = true;
+      nextFilters.matchType = "ranked";
+    }
+
+    if (name === "private") {
+      nextEnabled.matchType = true;
+      nextFilters.matchType = "private";
+    }
+
+    if (name === "arena") {
+      nextEnabled.matchType = true;
+      nextFilters.matchType = "arena";
+    }
+
+    if (name === "mirror") {
+      nextEnabled.matchup = true;
+      nextFilters.mirrorMatch = true;
+    }
+
+    setFilters(nextFilters);
+    setEnabled(nextEnabled);
+    setAdvancedEnabled(nextAdvanced);
+    setSelectedPets([]);
+    setSelectedPerks([]);
+    setSelectedToys([]);
+
+    const params = buildSearchParams({
+      filtersValue: nextFilters,
+      enabledValue: nextEnabled,
+      selectedPetsValue: [],
+      selectedPerksValue: [],
+      selectedToysValue: [],
+      advancedEnabledValue: nextAdvanced,
+      pageValue: 1
+    });
+    runSearch(null, 1, { paramsOverride: params });
   }
 
   async function openModal(replayId) {
@@ -611,6 +850,18 @@ export default function Page() {
     }
   }
 
+  async function copyPlayerId(playerId) {
+    if (!playerId) return;
+    try {
+      await navigator.clipboard.writeText(playerId);
+      setTagStatus(`Copied Player ID: ${playerId}`);
+      setTimeout(() => setTagStatus(""), 1500);
+    } catch {
+      setTagStatus("Failed to copy Player ID");
+      setTimeout(() => setTagStatus(""), 1500);
+    }
+  }
+
   const isArena = (type) => (type || "").toLowerCase() === "arena";
   const isMulti = (replay) => {
     if (!replay) return false;
@@ -654,15 +905,52 @@ export default function Page() {
           </div>
         )}
         <div className="status">{ingestStatus}</div>
+        {(ingestSummary.inserted > 0 ||
+          ingestSummary.skippedParticipation > 0 ||
+          ingestSummary.skippedMatch > 0 ||
+          ingestSummary.failed > 0) && (
+          <div className="ingest-summary">
+            <div><strong>Inserted:</strong> {ingestSummary.inserted}</div>
+            <div><strong>Skipped (PID):</strong> {ingestSummary.skippedParticipation}</div>
+            <div><strong>Skipped (Game ID):</strong> {ingestSummary.skippedMatch}</div>
+            <div><strong>Failed:</strong> {ingestSummary.failed}</div>
+          </div>
+        )}
+        {ingestSummary.failedEntries.length > 0 && (
+          <div className="ingest-failures">
+            <div className="ingest-failures-head">
+              <span>Failed Replay IDs</span>
+              <button type="button" className="ghost" onClick={retryFailedUploads}>
+                Retry Failed
+              </button>
+            </div>
+            <ul>
+              {ingestSummary.failedEntries.map((item) => (
+                <li key={`${item.participationId}-${item.reason}`}>
+                  <code>{item.participationId}</code>
+                  <span>{item.reason}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </section>
 
       <section className="section">
         <div className="section-head">
           <h2>Search</h2>
           <div className="section-actions">
+            <button type="button" className="ghost" onClick={copyShareLink}>Copy Link</button>
             <button type="button" className="ghost" onClick={clearAllFilters}>Clear Filters</button>
             <button className="secondary" type="button" onClick={(e) => runSearch(e, 1)}>Search</button>
           </div>
+        </div>
+        {shareStatus ? <div className="status">{shareStatus}</div> : null}
+        <div className="preset-row">
+          <button type="button" className="ghost" onClick={() => applyExplorePreset("ranked")}>Ranked</button>
+          <button type="button" className="ghost" onClick={() => applyExplorePreset("private")}>Private</button>
+          <button type="button" className="ghost" onClick={() => applyExplorePreset("arena")}>Arena</button>
+          <button type="button" className="ghost" onClick={() => applyExplorePreset("mirror")}>Mirror</button>
         </div>
         <div className="toggles">
           <button type="button" className={enabled.player ? "toggle active" : "toggle"} onClick={() => toggleFilter("player")}>Player</button>
@@ -693,22 +981,20 @@ export default function Page() {
                   />
                 </div>
                 <div className="field">
-                  <label>Opponent</label>
+                  <label>Player ID</label>
                   <input
-                    placeholder="Opponent name"
-                    value={filters.opponent}
-                    onChange={(e) => setFilters({ ...filters, opponent: e.target.value })}
+                    placeholder="Player UUID"
+                    value={filters.playerId}
+                    onChange={(e) => setFilters({ ...filters, playerId: e.target.value })}
                   />
                 </div>
                 <div className="field">
-                  <label>Either Player</label>
-                  <select
-                    value={filters.eitherPlayer ? "yes" : "no"}
-                    onChange={(e) => setFilters({ ...filters, eitherPlayer: e.target.value === "yes" })}
-                  >
-                    <option value="no">No</option>
-                    <option value="yes">Yes</option>
-                  </select>
+                  <label>Player 2</label>
+                  <input
+                    placeholder="Second player name"
+                    value={filters.opponent}
+                    onChange={(e) => setFilters({ ...filters, opponent: e.target.value })}
+                  />
                 </div>
               </>
             )}
@@ -740,6 +1026,16 @@ export default function Page() {
                         {pack.name}
                       </option>
                     ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Mirror Match</label>
+                  <select
+                    value={filters.mirrorMatch ? "yes" : "no"}
+                    onChange={(e) => setFilters({ ...filters, mirrorMatch: e.target.value === "yes" })}
+                  >
+                    <option value="no">No</option>
+                    <option value="yes">Yes</option>
                   </select>
                 </div>
               </>
@@ -863,16 +1159,6 @@ export default function Page() {
                         {pack.name}
                       </option>
                     ))}
-                  </select>
-                </div>
-                <div className="field">
-                  <label>Mirror Match</label>
-                  <select
-                    value={filters.mirrorMatch ? "yes" : "no"}
-                    onChange={(e) => setFilters({ ...filters, mirrorMatch: e.target.value === "yes" })}
-                  >
-                    <option value="no">No</option>
-                    <option value="yes">Yes</option>
                   </select>
                 </div>
                 <div className="field">
@@ -1072,7 +1358,14 @@ export default function Page() {
                   <img
                     src={getGameTypeIcon(r.match_type)}
                     alt={r.match_type || "Unknown"}
-                    style={{ transform: (r.match_type || "unknown").toLowerCase() === "ranked" ? "scale(1.15)" : "none" }}
+                    style={{
+                      transform:
+                        (r.match_type || "unknown").toLowerCase() === "private"
+                          ? "scaleX(-1)"
+                          : (r.match_type || "unknown").toLowerCase() === "ranked"
+                            ? "scale(1.15)"
+                            : "none"
+                    }}
                   />
                   <span
                     className="game-type-label"
@@ -1157,7 +1450,16 @@ export default function Page() {
                 )}
                 <div className="modal-sides">
                   <div className={`modal-side ${modalData.stats?.last_outcome === 1 ? "winner" : ""}`}>
-                    <h4>{modalData.replay.player_name || "Unknown Player"}</h4>
+                    <h4>
+                      <button
+                        type="button"
+                        className="player-id-copy"
+                        title={modalData.replay.player_id || "Player ID unavailable"}
+                        onClick={() => copyPlayerId(modalData.replay.player_id)}
+                      >
+                        {modalData.replay.player_name || "Unknown Player"}
+                      </button>
+                    </h4>
                     <div className="stat" onClick={maybeUnlockTags} role="button" tabIndex={0} onKeyDown={(e) => e.key === "Enter" && maybeUnlockTags(e)}>
                       <span className="label">Gold Spent</span>
                       <span>{modalData.stats?.player_gold_spent ?? "?"}</span>
@@ -1167,7 +1469,16 @@ export default function Page() {
                   </div>
                   {!isArena(modalData.replay.match_type) && !isMulti(modalData.replay) && (
                     <div className={`modal-side ${modalData.stats?.last_outcome === 2 ? "winner" : ""}`}>
-                      <h4>{modalData.replay.opponent_name || "Unknown"}</h4>
+                      <h4>
+                        <button
+                          type="button"
+                          className="player-id-copy"
+                          title={modalData.replay.opponent_id || "Player ID unavailable"}
+                          onClick={() => copyPlayerId(modalData.replay.opponent_id)}
+                        >
+                          {modalData.replay.opponent_name || "Unknown"}
+                        </button>
+                      </h4>
                       <div className="stat" onClick={maybeUnlockTags} role="button" tabIndex={0} onKeyDown={(e) => e.key === "Enter" && maybeUnlockTags(e)}>
                         <span className="label">Gold Spent</span>
                         <span>{modalData.stats?.opponent_gold_spent ?? "?"}</span>

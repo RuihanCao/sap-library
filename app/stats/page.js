@@ -147,6 +147,35 @@ const THEMES = {
 
 const EXCLUDED_PACKS = ["Custom", "Weekly"];
 
+function parseCsvList(value) {
+  if (!value) return [];
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+const DEFAULT_STATS_FILTERS = {
+  scope: "game",
+  player: "",
+  playerId: "",
+  pack: "",
+  opponentPack: "",
+  minTurn: "",
+  maxTurn: "",
+  pet: [],
+  petLevel: "",
+  perk: [],
+  toy: [],
+  allyPet: [],
+  opponentPet: [],
+  allyPerk: [],
+  opponentPerk: [],
+  allyToy: [],
+  opponentToy: [],
+  tags: ""
+};
+
 function pickTheme(name) {
   const lower = name.toLowerCase();
   if (lower.includes("arctic") || lower.includes("snow") || lower.includes("winter") || lower.includes("moon") || lower.includes("space") || lower.includes("lunar")) {
@@ -255,7 +284,7 @@ function IconMultiSelect({ label, options, selected, onChange, placeholder }) {
 
   return (
     <div className="multi-select">
-      <div className="multi-label">{label}</div>
+      {label ? <div className="multi-label">{label}</div> : null}
       <input
         className="multi-input"
         placeholder={placeholder}
@@ -307,24 +336,12 @@ function IconMultiSelect({ label, options, selected, onChange, placeholder }) {
 
 export default function StatsPage() {
   const [meta, setMeta] = useState({ pets: [], perks: [], toys: [], packs: [] });
-  const [filters, setFilters] = useState({
-    scope: "game",
-    pack: "",
-    opponentPack: "",
-    pet: [],
-    petLevel: "",
-    perk: [],
-    toy: [],
-    allyPet: [],
-    opponentPet: [],
-    allyPerk: [],
-    opponentPerk: [],
-    allyToy: [],
-    opponentToy: [],
-    tags: ""
-  });
+  const [filters, setFilters] = useState(DEFAULT_STATS_FILTERS);
   const [stats, setStats] = useState({
     totalGames: 0,
+    totalBattles: 0,
+    generatedAt: null,
+    newestEntryAt: null,
     packStats: [],
     petStats: [],
     perkStats: [],
@@ -343,6 +360,7 @@ export default function StatsPage() {
     perk: false,
     toy: false
   });
+  const [shareStatus, setShareStatus] = useState("");
 
   useEffect(() => {
     if (!BUILD_BACKGROUNDS.length) return;
@@ -372,41 +390,149 @@ export default function StatsPage() {
   const perkOptions = useMemo(() => meta.perks, [meta.perks]);
   const toyOptions = useMemo(() => meta.toys, [meta.toys]);
 
-  async function loadStats(nextFilters = filters) {
+  function buildStatsParams(
+    nextFilters = filters,
+    uiState = {
+      viewModeValue: viewMode,
+      petSortValue: petSort,
+      petOrderValue: petOrder,
+      perkSortValue: perkSort,
+      perkOrderValue: perkOrder,
+      toySortValue: toySort,
+      toyOrderValue: toyOrder
+    }
+  ) {
+    const params = new URLSearchParams();
+    if (nextFilters.scope) params.set("scope", nextFilters.scope);
+    if (nextFilters.player) params.set("player", nextFilters.player);
+    if (nextFilters.playerId) params.set("playerId", nextFilters.playerId);
+    if (nextFilters.pack) params.set("pack", nextFilters.pack);
+    if (nextFilters.opponentPack) params.set("opponentPack", nextFilters.opponentPack);
+    if (nextFilters.minTurn) params.set("minTurn", nextFilters.minTurn);
+    if (nextFilters.maxTurn) params.set("maxTurn", nextFilters.maxTurn);
+    if (nextFilters.pet?.length) params.set("pet", nextFilters.pet.join(","));
+    if (nextFilters.petLevel) params.set("petLevel", nextFilters.petLevel);
+    if (nextFilters.perk?.length) params.set("perk", nextFilters.perk.join(","));
+    if (nextFilters.toy?.length) params.set("toy", nextFilters.toy.join(","));
+    if (nextFilters.allyPet?.length) params.set("allyPet", nextFilters.allyPet.join(","));
+    if (nextFilters.opponentPet?.length) params.set("opponentPet", nextFilters.opponentPet.join(","));
+    if (nextFilters.allyPerk?.length) params.set("allyPerk", nextFilters.allyPerk.join(","));
+    if (nextFilters.opponentPerk?.length) params.set("opponentPerk", nextFilters.opponentPerk.join(","));
+    if (nextFilters.allyToy?.length) params.set("allyToy", nextFilters.allyToy.join(","));
+    if (nextFilters.opponentToy?.length) params.set("opponentToy", nextFilters.opponentToy.join(","));
+    if (nextFilters.tags) params.set("tags", nextFilters.tags);
+
+    params.set("uiView", uiState.viewModeValue || "card");
+    params.set("uiPetSort", uiState.petSortValue || "name");
+    params.set("uiPetOrder", uiState.petOrderValue || "asc");
+    params.set("uiPerkSort", uiState.perkSortValue || "name");
+    params.set("uiPerkOrder", uiState.perkOrderValue || "asc");
+    params.set("uiToySort", uiState.toySortValue || "name");
+    params.set("uiToyOrder", uiState.toyOrderValue || "asc");
+
+    return params;
+  }
+
+  async function loadStats(nextFilters = filters, options = {}) {
+    const params = options.paramsOverride
+      ? new URLSearchParams(options.paramsOverride.toString())
+      : buildStatsParams(nextFilters, options.uiState);
+
     setLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (nextFilters.scope) params.set("scope", nextFilters.scope);
-      if (nextFilters.pack) params.set("pack", nextFilters.pack);
-      if (nextFilters.opponentPack) params.set("opponentPack", nextFilters.opponentPack);
-      if (nextFilters.pet?.length) params.set("pet", nextFilters.pet.join(","));
-      if (nextFilters.petLevel) params.set("petLevel", nextFilters.petLevel);
-      if (nextFilters.perk?.length) params.set("perk", nextFilters.perk.join(","));
-      if (nextFilters.toy?.length) params.set("toy", nextFilters.toy.join(","));
-      if (nextFilters.allyPet?.length) params.set("allyPet", nextFilters.allyPet.join(","));
-      if (nextFilters.opponentPet?.length) params.set("opponentPet", nextFilters.opponentPet.join(","));
-      if (nextFilters.allyPerk?.length) params.set("allyPerk", nextFilters.allyPerk.join(","));
-      if (nextFilters.opponentPerk?.length) params.set("opponentPerk", nextFilters.opponentPerk.join(","));
-      if (nextFilters.allyToy?.length) params.set("allyToy", nextFilters.allyToy.join(","));
-      if (nextFilters.opponentToy?.length) params.set("opponentToy", nextFilters.opponentToy.join(","));
-      if (nextFilters.tags) params.set("tags", nextFilters.tags);
       const res = await fetch(`/api/stats?${params.toString()}`);
       const data = await res.json();
       setStats({
         totalGames: data.totalGames || 0,
+        totalBattles: data.totalBattles || 0,
+        generatedAt: data.generatedAt || null,
+        newestEntryAt: data.newestEntryAt || null,
         packStats: data.packStats || [],
         petStats: data.petStats || [],
         perkStats: data.perkStats || [],
         toyStats: data.toyStats || []
       });
+
+      if (!options.skipUrlSync) {
+        const nextUrl = params.toString() ? `?${params.toString()}` : window.location.pathname;
+        window.history.replaceState({}, "", nextUrl);
+      }
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    loadStats(filters);
-  }, [filters.scope]);
+    const urlParams = new URLSearchParams(window.location.search);
+    const hasQuery = Array.from(urlParams.keys()).length > 0;
+
+    if (!hasQuery) {
+      loadStats(DEFAULT_STATS_FILTERS);
+      return;
+    }
+
+    const nextFilters = {
+      ...DEFAULT_STATS_FILTERS,
+      scope: urlParams.get("scope") || "game",
+      player: urlParams.get("player") || "",
+      playerId: urlParams.get("playerId") || "",
+      pack: urlParams.get("pack") || "",
+      opponentPack: urlParams.get("opponentPack") || "",
+      minTurn: urlParams.get("minTurn") || "",
+      maxTurn: urlParams.get("maxTurn") || "",
+      pet: parseCsvList(urlParams.get("pet")),
+      petLevel: urlParams.get("petLevel") || "",
+      perk: parseCsvList(urlParams.get("perk")),
+      toy: parseCsvList(urlParams.get("toy")),
+      allyPet: parseCsvList(urlParams.get("allyPet")),
+      opponentPet: parseCsvList(urlParams.get("opponentPet")),
+      allyPerk: parseCsvList(urlParams.get("allyPerk")),
+      opponentPerk: parseCsvList(urlParams.get("opponentPerk")),
+      allyToy: parseCsvList(urlParams.get("allyToy")),
+      opponentToy: parseCsvList(urlParams.get("opponentToy")),
+      tags: urlParams.get("tags") || ""
+    };
+
+    const nextViewMode = urlParams.get("uiView") || "card";
+    const nextPetSort = urlParams.get("uiPetSort") || "name";
+    const nextPetOrder = urlParams.get("uiPetOrder") || "asc";
+    const nextPerkSort = urlParams.get("uiPerkSort") || "name";
+    const nextPerkOrder = urlParams.get("uiPerkOrder") || "asc";
+    const nextToySort = urlParams.get("uiToySort") || "name";
+    const nextToyOrder = urlParams.get("uiToyOrder") || "asc";
+
+    setFilters(nextFilters);
+    setViewMode(nextViewMode === "list" ? "list" : "card");
+    setPetSort(nextPetSort);
+    setPetOrder(nextPetOrder === "desc" ? "desc" : "asc");
+    setPerkSort(nextPerkSort);
+    setPerkOrder(nextPerkOrder === "desc" ? "desc" : "asc");
+    setToySort(nextToySort);
+    setToyOrder(nextToyOrder === "desc" ? "desc" : "asc");
+
+    const hydratedParams = buildStatsParams(nextFilters, {
+      viewModeValue: nextViewMode,
+      petSortValue: nextPetSort,
+      petOrderValue: nextPetOrder,
+      perkSortValue: nextPerkSort,
+      perkOrderValue: nextPerkOrder,
+      toySortValue: nextToySort,
+      toyOrderValue: nextToyOrder
+    });
+
+    loadStats(nextFilters, { paramsOverride: hydratedParams, skipUrlSync: true });
+  }, []);
+
+  async function copyShareLink() {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setShareStatus("Link copied.");
+      setTimeout(() => setShareStatus(""), 1400);
+    } catch {
+      setShareStatus("Could not copy link.");
+      setTimeout(() => setShareStatus(""), 1400);
+    }
+  }
 
   const petSprite = (name) => petOptions.find((pet) => pet.name === name)?.sprite;
   const perkSprite = (name) => perkOptions.find((perk) => perk.name === name)?.sprite;
@@ -602,7 +728,25 @@ export default function StatsPage() {
       }
     }, toyOrder);
   }, [stats.toyStats, stats.totalGames, toySort, toyOrder]);
+  const totalPetCount = useMemo(
+    () => sortedPetStats.reduce((sum, row) => sum + Number(row.games_with || 0), 0),
+    [sortedPetStats]
+  );
+  const totalPerkCount = useMemo(
+    () => sortedPerkStats.reduce((sum, row) => sum + Number(row.games_with || 0), 0),
+    [sortedPerkStats]
+  );
+  const totalToyCount = useMemo(
+    () => sortedToyStats.reduce((sum, row) => sum + Number(row.games_with || 0), 0),
+    [sortedToyStats]
+  );
+  const totalPackEntries = useMemo(
+    () => sortedPackStats.reduce((sum, row) => sum + Number(row.games || 0), 0),
+    [sortedPackStats]
+  );
   const statsCardsClass = `stats-cards${viewMode === "list" ? " list-view" : ""}`;
+  const generatedAtLabel = stats.generatedAt ? new Date(stats.generatedAt).toLocaleString() : "-";
+  const newestEntryLabel = stats.newestEntryAt ? new Date(stats.newestEntryAt).toLocaleString() : "-";
 
   return (
     <main onClick={() => setSortMenuOpen({ pet: false, perk: false, toy: false })}>
@@ -622,26 +766,12 @@ export default function StatsPage() {
         <div className="section-head">
           <h2>Filters</h2>
           <div className="section-actions">
+            <button className="ghost" type="button" onClick={copyShareLink}>Copy Link</button>
             <button
               className="ghost"
               type="button"
               onClick={() => {
-                const reset = {
-                  scope: "game",
-                  pack: "",
-                  opponentPack: "",
-                  pet: [],
-                  petLevel: "",
-                  perk: [],
-                  toy: [],
-                  allyPet: [],
-                  opponentPet: [],
-                  allyPerk: [],
-                  opponentPerk: [],
-                  allyToy: [],
-                  opponentToy: [],
-                  tags: ""
-                };
+                const reset = { ...DEFAULT_STATS_FILTERS };
                 setFilters(reset);
                 loadStats(reset);
               }}
@@ -651,12 +781,33 @@ export default function StatsPage() {
             <button className="secondary" type="button" onClick={() => loadStats(filters)}>Apply</button>
           </div>
         </div>
+        {shareStatus ? <div className="status">{shareStatus}</div> : null}
         <div className="filters">
+          <div className="field">
+            <label>Player Name</label>
+            <input
+              placeholder="Any player"
+              value={filters.player}
+              onChange={(e) => setFilters({ ...filters, player: e.target.value })}
+            />
+          </div>
+          <div className="field">
+            <label>Player ID</label>
+            <input
+              placeholder="Player UUID"
+              value={filters.playerId}
+              onChange={(e) => setFilters({ ...filters, playerId: e.target.value })}
+            />
+          </div>
           <div className="field">
             <label>Scope</label>
             <select
               value={filters.scope}
-              onChange={(e) => setFilters({ ...filters, scope: e.target.value })}
+              onChange={(e) => {
+                const next = { ...filters, scope: e.target.value };
+                setFilters(next);
+                loadStats(next);
+              }}
             >
               <option value="game">Per Game</option>
               <option value="battle">Per Battle</option>
@@ -680,13 +831,30 @@ export default function StatsPage() {
               ))}
             </select>
           </div>
-          <IconMultiSelect
-            label="Pet"
-            options={petOptions}
-            selected={filters.pet}
-            onChange={(value) => setFilters({ ...filters, pet: value })}
-            placeholder="Search pets and add"
-          />
+          {filters.scope === "battle" && (
+            <>
+              <div className="field">
+                <label>Min Turn</label>
+                <input
+                  type="number"
+                  min="1"
+                  placeholder="1"
+                  value={filters.minTurn}
+                  onChange={(e) => setFilters({ ...filters, minTurn: e.target.value })}
+                />
+              </div>
+              <div className="field">
+                <label>Max Turn</label>
+                <input
+                  type="number"
+                  min="1"
+                  placeholder="15"
+                  value={filters.maxTurn}
+                  onChange={(e) => setFilters({ ...filters, maxTurn: e.target.value })}
+                />
+              </div>
+            </>
+          )}
           <div className="field">
             <label>Pet Level</label>
             <select value={filters.petLevel} onChange={(e) => setFilters({ ...filters, petLevel: e.target.value })}>
@@ -696,20 +864,6 @@ export default function StatsPage() {
               <option value="3">3</option>
             </select>
           </div>
-          <IconMultiSelect
-            label="Perk"
-            options={perkOptions}
-            selected={filters.perk}
-            onChange={(value) => setFilters({ ...filters, perk: value })}
-            placeholder="Search perks and add"
-          />
-          <IconMultiSelect
-            label="Toy"
-            options={toyOptions}
-            selected={filters.toy}
-            onChange={(value) => setFilters({ ...filters, toy: value })}
-            placeholder="Search toys and add"
-          />
         </div>
         <details className="advanced-panel">
           <summary>Advanced</summary>
@@ -795,6 +949,36 @@ export default function StatsPage() {
             </div>
           </div>
         </div>
+        <div className="stats-summary-grid">
+          <div className="stats-summary-item">
+            <span className="label">Total Games</span>
+            <strong>{Number(stats.totalGames || 0)}</strong>
+          </div>
+          <div className="stats-summary-item">
+            <span className="label">Total Battles</span>
+            <strong>{Number(stats.totalBattles || 0)}</strong>
+          </div>
+          <div className="stats-summary-item">
+            <span className="label">Total Pets</span>
+            <strong>{totalPetCount}</strong>
+          </div>
+          <div className="stats-summary-item">
+            <span className="label">Total Perks</span>
+            <strong>{totalPerkCount}</strong>
+          </div>
+          <div className="stats-summary-item">
+            <span className="label">Total Toys</span>
+            <strong>{totalToyCount}</strong>
+          </div>
+          <div className="stats-summary-item">
+            <span className="label">Last Refresh</span>
+            <strong>{generatedAtLabel}</strong>
+          </div>
+          <div className="stats-summary-item">
+            <span className="label">Data Through</span>
+            <strong>{newestEntryLabel}</strong>
+          </div>
+        </div>
         {!loading && stats.totalGames === 0 && (
           <div className="empty-state">No games match the current filters.</div>
         )}
@@ -802,7 +986,7 @@ export default function StatsPage() {
 
       <section className="section">
         <div className="results-header">
-          <h2>Pack Winrates</h2>
+          <h2>Pack Stats</h2>
         </div>
         <div className={statsCardsClass}>
           {sortedPackStats.map((row) => {
@@ -822,6 +1006,7 @@ export default function StatsPage() {
                   <span>{filters.scope === "battle" ? "Rounds" : "Games"}: {games}</span>
                 </div>
                 <div className="stats-card-metrics">
+                  <div>Pickrate: {formatPct(totalPackEntries ? games / totalPackEntries : 0)}</div>
                   <div>Winrate: {formatPct(games ? wins / games : 0)}</div>
                   <div>Lossrate: {formatPct(games ? losses / games : 0)}</div>
                   {filters.scope === "battle" ? (
@@ -838,8 +1023,17 @@ export default function StatsPage() {
       </section>
 
       <section className="section">
-        <div className="results-header">
-          <h2>Pet Impact</h2>
+        <div className="results-header with-inline-filter">
+          <h2>Pet Stats</h2>
+          <div className="section-inline-filter">
+            <IconMultiSelect
+              label=""
+              options={petOptions}
+              selected={filters.pet}
+              onChange={(value) => setFilters({ ...filters, pet: value })}
+              placeholder="Search pets..."
+            />
+          </div>
           <div className="sort-menu" onClick={(e) => e.stopPropagation()}>
             <button
               type="button"
@@ -925,8 +1119,17 @@ export default function StatsPage() {
       </section>
 
       <section className="section">
-        <div className="results-header">
-          <h2>Perk Impact</h2>
+        <div className="results-header with-inline-filter">
+          <h2>Perk Stats</h2>
+          <div className="section-inline-filter">
+            <IconMultiSelect
+              label="Perk Search"
+              options={perkOptions}
+              selected={filters.perk}
+              onChange={(value) => setFilters({ ...filters, perk: value })}
+              placeholder="Search perks and add"
+            />
+          </div>
           <div className="sort-menu" onClick={(e) => e.stopPropagation()}>
             <button
               type="button"
@@ -1012,8 +1215,17 @@ export default function StatsPage() {
       </section>
 
       <section className="section">
-        <div className="results-header">
-          <h2>Toy Impact</h2>
+        <div className="results-header with-inline-filter">
+          <h2>Toy Stats</h2>
+          <div className="section-inline-filter">
+            <IconMultiSelect
+              label="Toy Search"
+              options={toyOptions}
+              selected={filters.toy}
+              onChange={(value) => setFilters({ ...filters, toy: value })}
+              placeholder="Search toys and add"
+            />
+          </div>
           <div className="sort-menu" onClick={(e) => e.stopPropagation()}>
             <button
               type="button"

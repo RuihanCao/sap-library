@@ -55,7 +55,10 @@ export async function POST(req) {
   const client = await pool.connect();
   let inserted = 0;
   let skipped = 0;
+  let skippedParticipation = 0;
+  let skippedMatch = 0;
   let failed = 0;
+  const failedEntries = [];
 
   try {
     for (const rawId of participationIds) {
@@ -69,18 +72,33 @@ export async function POST(req) {
 
       if (existing.rowCount) {
         skipped += 1;
+        skippedParticipation += 1;
         continue;
       }
 
       try {
         const raw = await fetchReplay(participationId);
         const parsed = parseReplay(raw);
+        if (parsed.matchId) {
+          const existingMatch = await client.query(
+            "select id from replays where match_id=$1",
+            [parsed.matchId]
+          );
+          if (existingMatch.rowCount) {
+            skipped += 1;
+            skippedMatch += 1;
+            continue;
+          }
+        }
 
         const replayRes = await client.query(
-          `insert into replays (participation_id, player_name, opponent_name, pack, opponent_pack, game_version, max_lives, raw_json)
-           values ($1, $2, $3, $4, $5, $6, $7, $8) returning id`,
+          `insert into replays (participation_id, match_id, player_name, opponent_name, pack, opponent_pack, game_version, max_lives, raw_json)
+           values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+           on conflict do nothing
+           returning id`,
           [
             participationId,
+            parsed.matchId,
             parsed.playerName,
             parsed.opponentName,
             parsed.packName,
@@ -90,8 +108,34 @@ export async function POST(req) {
             raw
           ]
         );
+        const replayId = replayRes.rows[0]?.id;
+        if (!replayId) {
+          const byPid = await client.query(
+            "select id from replays where participation_id=$1 limit 1",
+            [participationId]
+          );
+          if (byPid.rowCount) {
+            skipped += 1;
+            skippedParticipation += 1;
+            continue;
+          }
 
-        const replayId = replayRes.rows[0].id;
+          if (parsed.matchId) {
+            const byMatch = await client.query(
+              "select id from replays where match_id=$1 limit 1",
+              [parsed.matchId]
+            );
+            if (byMatch.rowCount) {
+              skipped += 1;
+              skippedMatch += 1;
+              continue;
+            }
+          }
+
+          failed += 1;
+          failedEntries.push({ participationId, reason: "failed to insert replay" });
+          continue;
+        }
 
         for (const t of parsed.turns) {
           await client.query(
@@ -148,10 +192,18 @@ export async function POST(req) {
       } catch (err) {
         console.error("Bulk ingest failed", { participationId, error: err.message });
         failed += 1;
+        failedEntries.push({ participationId, reason: err.message || "failed" });
       }
     }
 
-    const res = NextResponse.json({ inserted, skipped, failed });
+    const res = NextResponse.json({
+      inserted,
+      skipped,
+      skippedParticipation,
+      skippedMatch,
+      failed,
+      failedEntries
+    });
     return applyRateLimitHeaders(res, limitInfo);
   } finally {
     client.release();

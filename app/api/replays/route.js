@@ -75,16 +75,34 @@ export async function POST(req) {
     );
 
     if (existing.rowCount) {
-      const res = NextResponse.json({ replayId: existing.rows[0].id, status: "exists" });
+      const res = NextResponse.json({
+        replayId: existing.rows[0].id,
+        status: "exists_participation"
+      });
       return applyRateLimitHeaders(res, limitInfo);
     }
 
     const raw = await fetchReplay(participationId);
     const parsed = parseReplay(raw);
 
+    if (parsed.matchId) {
+      const existingMatch = await client.query(
+        "select id from replays where match_id=$1",
+        [parsed.matchId]
+      );
+      if (existingMatch.rowCount) {
+        const res = NextResponse.json({
+          replayId: existingMatch.rows[0].id,
+          status: "exists_match"
+        });
+        return applyRateLimitHeaders(res, limitInfo);
+      }
+    }
+
     const replayRes = await client.query(
       `insert into replays (
          participation_id,
+         match_id,
          player_name,
          opponent_name,
          pack,
@@ -100,9 +118,12 @@ export async function POST(req) {
          spectator_mode,
          raw_json
        )
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) returning id`,
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+       on conflict do nothing
+       returning id`,
       [
         participationId,
+        parsed.matchId,
         parsed.playerName,
         parsed.opponentName,
         parsed.packName,
@@ -119,8 +140,35 @@ export async function POST(req) {
         raw
       ]
     );
+    let replayId = replayRes.rows[0]?.id;
+    if (!replayId) {
+      const existingByPid = await client.query(
+        "select id from replays where participation_id=$1 limit 1",
+        [participationId]
+      );
+      if (existingByPid.rowCount) {
+        const res = NextResponse.json({
+          replayId: existingByPid.rows[0].id,
+          status: "exists_participation"
+        });
+        return applyRateLimitHeaders(res, limitInfo);
+      }
 
-    const replayId = replayRes.rows[0].id;
+      if (parsed.matchId) {
+        const existingByMatch = await client.query(
+          "select id from replays where match_id=$1 limit 1",
+          [parsed.matchId]
+        );
+        if (existingByMatch.rowCount) {
+          const res = NextResponse.json({
+            replayId: existingByMatch.rows[0].id,
+            status: "exists_match"
+          });
+          return applyRateLimitHeaders(res, limitInfo);
+        }
+      }
+      throw new Error("failed to insert replay");
+    }
 
     for (const t of parsed.turns) {
       await client.query(
@@ -176,7 +224,13 @@ export async function POST(req) {
     const res = NextResponse.json({ replayId, status: "inserted" });
     return applyRateLimitHeaders(res, limitInfo);
   } catch (err) {
-    const res = NextResponse.json({ error: err.message || "failed" }, { status: 500 });
+    const res = NextResponse.json(
+      {
+        error: err.message || "failed",
+        status: "failed"
+      },
+      { status: 500 }
+    );
     return applyRateLimitHeaders(res, limitInfo);
   } finally {
     client.release();

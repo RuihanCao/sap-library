@@ -3,6 +3,7 @@
 create table if not exists replays (
   id uuid primary key default uuid_generate_v4(),
   participation_id text unique not null,
+  match_id text,
   player_name text,
   opponent_name text,
   pack text,
@@ -20,6 +21,7 @@ create table if not exists replays (
   raw_json jsonb not null,
   created_at timestamptz default now()
 );
+alter table replays add column if not exists match_id text;
 
 create table if not exists turns (
   id uuid primary key default uuid_generate_v4(),
@@ -52,6 +54,8 @@ create table if not exists pets (
 );
 
 create index if not exists idx_replays_participation_id on replays(participation_id);
+create unique index if not exists idx_replays_match_id_unique on replays(match_id) where match_id is not null;
+create index if not exists idx_replays_match_id on replays(match_id);
 create index if not exists idx_replays_player_name on replays(player_name);
 create index if not exists idx_replays_pack on replays(pack);
 create index if not exists idx_replays_opponent_pack on replays(opponent_pack);

@@ -69,12 +69,24 @@ export async function GET(_req, context) {
 
     let playerUnspentGold = null;
     let opponentUnspentGold = null;
+    let playerId = null;
+    let opponentId = null;
     try {
       const raw = replayRes.rows[0].raw_json;
+      playerId = raw?.UserId || null;
+      try {
+        const modeModel = raw?.GenesisModeModel ? JSON.parse(raw.GenesisModeModel) : null;
+        opponentId = modeModel?.Opponents?.[0]?.UserId || null;
+      } catch {
+        // ignore
+      }
       const actions = raw?.Actions || [];
       const battles = actions
         .filter((a) => a.Type === 0)
         .map((a) => JSON.parse(a.Battle));
+      if (!opponentId) {
+        opponentId = battles?.[0]?.Opponent?.Id || null;
+      }
       let pTotal = 0;
       let oTotal = 0;
       for (const battle of battles) {
@@ -96,6 +108,8 @@ export async function GET(_req, context) {
     return NextResponse.json({
       replay: {
         ...replayRes.rows[0],
+        player_id: playerId,
+        opponent_id: opponentId,
         raw_json: undefined
       },
       stats: {
