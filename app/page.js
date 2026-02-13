@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 
 const BUILD_BACKGROUNDS = [
@@ -346,6 +346,8 @@ export default function Page() {
   const [results, setResults] = useState([]);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
+  const [exploreViewMode, setExploreViewMode] = useState("card");
+  const [searchLoading, setSearchLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [modalLoading, setModalLoading] = useState(false);
   const [modalData, setModalData] = useState(null);
@@ -354,6 +356,8 @@ export default function Page() {
   const [tagStatus, setTagStatus] = useState("");
   const [showTagEditor, setShowTagEditor] = useState(false);
   const [shareStatus, setShareStatus] = useState("");
+  const [modalShareStatus, setModalShareStatus] = useState("");
+  const listSentinelRef = useRef(null);
   const replayImageVersion = "2026-02-12-text-fix";
 
   useEffect(() => {
@@ -391,7 +395,7 @@ export default function Page() {
         setAdvancedEnabled((prev) => !prev);
       }
       if (event.key === "Escape") {
-        setModalOpen(false);
+        closeModal();
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -404,6 +408,7 @@ export default function Page() {
     selectedPetsValue = selectedPets,
     selectedPerksValue = selectedPerks,
     selectedToysValue = selectedToys,
+    exploreViewValue = exploreViewMode,
     advancedEnabledValue = advancedEnabled,
     pageValue = 1
   } = {}) {
@@ -460,6 +465,7 @@ export default function Page() {
     params.set("pageSize", String(filtersValue.pageSize || "10"));
     params.set("sort", filtersValue.sort || "created_at");
     params.set("order", filtersValue.order || "desc");
+    params.set("uiView", exploreViewValue || "card");
 
     const enabledKeys = Object.entries(enabledValue)
       .filter(([, isOn]) => Boolean(isOn))
@@ -473,9 +479,14 @@ export default function Page() {
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const hasQuery = Array.from(urlParams.keys()).length > 0;
+    const replayFromUrl = urlParams.get("replay");
+    const uiViewFromUrl = (urlParams.get("uiView") || "card").toLowerCase();
+    const initialView = uiViewFromUrl === "list" ? "list" : "card";
+    setExploreViewMode(initialView);
 
     if (!hasQuery) {
-      runSearch(null, 1);
+      runSearch(null, 1, { exploreViewValue: initialView });
+      if (replayFromUrl) openModal(replayFromUrl, { skipUrlSync: true });
       return;
     }
 
@@ -580,11 +591,13 @@ export default function Page() {
       selectedPetsValue: nextSelectedPets,
       selectedPerksValue: nextSelectedPerks,
       selectedToysValue: nextSelectedToys,
+      exploreViewValue: initialView,
       advancedEnabledValue: nextAdvancedEnabled,
       pageValue: nextPage
     });
 
     runSearch(null, nextPage, { paramsOverride: hydratedParams, skipUrlSync: true });
+    if (replayFromUrl) openModal(replayFromUrl, { skipUrlSync: true });
   }, []);
 
   function toggleFilter(key) {
@@ -703,23 +716,52 @@ export default function Page() {
 
   async function runSearch(e, pageOverride, options = {}) {
     if (e) e.preventDefault();
+    if (searchLoading && options.append) return;
     const pageValue = pageOverride || 1;
     const params = options.paramsOverride
       ? new URLSearchParams(options.paramsOverride.toString())
-      : buildSearchParams({ pageValue });
+      : buildSearchParams({ pageValue, exploreViewValue: options.exploreViewValue || exploreViewMode });
 
     if (!params.get("page")) params.set("page", String(pageValue));
-    const res = await fetch(`/api/search?${params.toString()}`);
-    const data = await res.json();
+    setSearchLoading(true);
+    try {
+      const res = await fetch(`/api/search?${params.toString()}`);
+      const data = await res.json();
+      const incoming = data.results || [];
 
-    setResults(data.results || []);
-    setTotal(data.total || 0);
-    setPage(data.page || pageValue);
+      setResults((prev) => {
+        if (!options.append) return incoming;
+        const seen = new Set(prev.map((item) => item.id));
+        const merged = [...prev];
+        for (const row of incoming) {
+          if (!seen.has(row.id)) {
+            merged.push(row);
+            seen.add(row.id);
+          }
+        }
+        return merged;
+      });
+      setTotal(data.total || 0);
+      setPage(data.page || pageValue);
 
-    if (!options.skipUrlSync) {
-      const nextUrl = params.toString() ? `?${params.toString()}` : window.location.pathname;
-      window.history.replaceState({}, "", nextUrl);
+      if (!options.skipUrlSync) {
+        const currentParams = new URLSearchParams(window.location.search);
+        const replayId = currentParams.get("replay");
+        if (replayId) {
+          params.set("replay", replayId);
+        }
+        const nextUrl = params.toString() ? `?${params.toString()}` : window.location.pathname;
+        window.history.replaceState({}, "", nextUrl);
+      }
+    } finally {
+      setSearchLoading(false);
     }
+  }
+
+  function switchExploreView(nextView) {
+    const normalized = nextView === "list" ? "list" : "card";
+    setExploreViewMode(normalized);
+    runSearch(null, 1, { exploreViewValue: normalized });
   }
 
   async function copyShareLink() {
@@ -731,6 +773,56 @@ export default function Page() {
     } catch {
       setShareStatus("Could not copy link.");
       setTimeout(() => setShareStatus(""), 1400);
+    }
+  }
+
+  useEffect(() => {
+    if (exploreViewMode !== "list") return;
+    const node = listSentinelRef.current;
+    if (!node) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (!entry?.isIntersecting) return;
+        if (searchLoading) return;
+        if (results.length >= total) return;
+        runSearch(null, page + 1, { append: true, exploreViewValue: "list" });
+      },
+      { root: null, rootMargin: "240px 0px", threshold: 0.01 }
+    );
+
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [exploreViewMode, results.length, total, page, searchLoading]);
+
+  function syncReplayParam(replayId) {
+    const params = new URLSearchParams(window.location.search);
+    if (replayId) {
+      params.set("replay", replayId);
+    } else {
+      params.delete("replay");
+    }
+    const nextUrl = params.toString() ? `?${params.toString()}` : window.location.pathname;
+    window.history.replaceState({}, "", nextUrl);
+  }
+
+  function closeModal() {
+    setModalOpen(false);
+    syncReplayParam(null);
+  }
+
+  async function copyReplayShareLink() {
+    if (!modalData?.replay?.id) return;
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set("replay", modalData.replay.id);
+      await navigator.clipboard.writeText(url.toString());
+      setModalShareStatus("Replay link copied.");
+      setTimeout(() => setModalShareStatus(""), 1400);
+    } catch {
+      setModalShareStatus("Could not copy replay link.");
+      setTimeout(() => setModalShareStatus(""), 1400);
     }
   }
 
@@ -783,10 +875,14 @@ export default function Page() {
     runSearch(null, 1, { paramsOverride: params });
   }
 
-  async function openModal(replayId) {
+  async function openModal(replayId, options = {}) {
+    if (!options.skipUrlSync) {
+      syncReplayParam(replayId);
+    }
     setModalOpen(true);
     setModalLoading(true);
     setModalData(null);
+    setModalShareStatus("");
     try {
       const res = await fetch(`/api/replays/${replayId}`);
       const data = await res.json();
@@ -942,7 +1038,7 @@ export default function Page() {
           <div className="section-actions">
             <button type="button" className="ghost" onClick={copyShareLink}>Copy Link</button>
             <button type="button" className="ghost" onClick={clearAllFilters}>Clear Filters</button>
-            <button className="secondary" type="button" onClick={(e) => runSearch(e, 1)}>Search</button>
+            <button className="secondary" type="submit" form="search-form">Search</button>
           </div>
         </div>
         {shareStatus ? <div className="status">{shareStatus}</div> : null}
@@ -968,7 +1064,7 @@ export default function Page() {
             Advanced
           </button>
         </div>
-        <form onSubmit={(e) => runSearch(e, 1)}>
+        <form id="search-form" onSubmit={(e) => runSearch(e, 1)}>
           <div className="filters">
             {enabled.player && (
               <>
@@ -1307,6 +1403,22 @@ export default function Page() {
           <h2>Results</h2>
           <div className="results-actions">
             <div className="status">{total} results</div>
+            <div className="view-toggle">
+              <button
+                type="button"
+                className={exploreViewMode === "card" ? "toggle active" : "toggle"}
+                onClick={() => switchExploreView("card")}
+              >
+                Card
+              </button>
+              <button
+                type="button"
+                className={exploreViewMode === "list" ? "toggle active" : "toggle"}
+                onClick={() => switchExploreView("list")}
+              >
+                List
+              </button>
+            </div>
             <div className="sort-menu" onClick={(e) => e.stopPropagation()}>
               <button
                 type="button"
@@ -1341,67 +1453,117 @@ export default function Page() {
             </div>
           </div>
         </div>
-        <div className="results">
+        <div className={exploreViewMode === "list" ? "results list-view" : "results"}>
           {results.map((r) => (
-            <div className="card" key={r.id} role="button" tabIndex={0} onClick={() => openModal(r.id)} onKeyDown={(e) => e.key === "Enter" && openModal(r.id)}>
-              <div className="card-head">
-                <h3>
-                  <span className="name-line">{r.player_name || "Unknown Player"}</span>
-                  <span className="name-line vs-line">vs</span>
-                  {isArena(r.match_type) || isMulti(r) ? (
-                    <span className="name-line world-name">The World</span>
-                  ) : (
-                    <span className="name-line">{r.opponent_name || "Unknown"}</span>
-                  )}
-                </h3>
-                <div className="game-type">
-                  <img
-                    src={getGameTypeIcon(r.match_type)}
-                    alt={r.match_type || "Unknown"}
-                    style={{
-                      transform:
-                        (r.match_type || "unknown").toLowerCase() === "private"
-                          ? "scaleX(-1)"
-                          : (r.match_type || "unknown").toLowerCase() === "ranked"
-                            ? "scale(1.15)"
-                            : "none"
-                    }}
-                  />
-                  <span
-                    className="game-type-label"
-                    style={{ fontSize: (r.match_type || "unknown").length > 6 ? "10px" : "11px" }}
-                  >
-                    {(r.match_type || "unknown").toUpperCase()}
-                  </span>
+            exploreViewMode === "list" ? (
+              <div
+                className="list-row"
+                key={r.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => openModal(r.id)}
+                onKeyDown={(e) => e.key === "Enter" && openModal(r.id)}
+              >
+                <div className="list-main">
+                  <div className="list-title">
+                    {Number(r.last_outcome) === 1 ? <img className="winner-trophy-inline" src="/Sprite/Cosmetic/Trophy_2x%20%23103437.png" alt="Winner" /> : null}
+                    <span>{r.player_name || "Unknown Player"}</span>
+                    <span className="vs-line">vs</span>
+                    {Number(r.last_outcome) === 2 ? <img className="winner-trophy-inline" src="/Sprite/Cosmetic/Trophy_2x%20%23103437.png" alt="Winner" /> : null}
+                    <span className={isArena(r.match_type) || isMulti(r) ? "world-name" : ""}>
+                      {isArena(r.match_type) || isMulti(r) ? "The World" : (r.opponent_name || "Unknown")}
+                    </span>
+                  </div>
+                  <div className="list-meta">
+                    {r.pack || "Unknown"} vs {r.opponent_pack || "Unknown"} • {(r.match_type || "unknown").toUpperCase()}
+                  </div>
+                </div>
+                <div className="list-time">
+                  {r.created_at ? new Date(r.created_at).toLocaleDateString() : ""}
                 </div>
               </div>
-              <div className="muted">Matchup: {r.pack || "Unknown"} vs {r.opponent_pack || "Unknown"}</div>
-              <div className="replay-image-wrap">
-                <img
-                  className="replay-image"
-                  src={`/api/replays/${r.id}/image?v=${encodeURIComponent(r.created_at || replayImageVersion)}`}
-                  alt="Replay"
-                  onLoad={(e) => e.currentTarget.closest(".replay-image-wrap")?.classList.add("loaded")}
-                  onError={(e) => e.currentTarget.closest(".replay-image-wrap")?.classList.add("loaded")}
-                />
+            ) : (
+              <div className="card" key={r.id} role="button" tabIndex={0} onClick={() => openModal(r.id)} onKeyDown={(e) => e.key === "Enter" && openModal(r.id)}>
+                <div className="card-head">
+                  <h3>
+                    <span className="name-line winner-line">
+                      {r.player_name || "Unknown Player"}
+                      {Number(r.last_outcome) === 1 ? <img className="winner-trophy-inline" src="/Sprite/Cosmetic/Trophy_2x%20%23103437.png" alt="Winner" /> : null}
+                    </span>
+                    <span className="name-line vs-line">vs</span>
+                    {isArena(r.match_type) || isMulti(r) ? (
+                      <span className="name-line world-name winner-line">
+                        The World
+                        {Number(r.last_outcome) === 2 ? <img className="winner-trophy-inline" src="/Sprite/Cosmetic/Trophy_2x%20%23103437.png" alt="Winner" /> : null}
+                      </span>
+                    ) : (
+                      <span className="name-line winner-line">
+                        {r.opponent_name || "Unknown"}
+                        {Number(r.last_outcome) === 2 ? <img className="winner-trophy-inline" src="/Sprite/Cosmetic/Trophy_2x%20%23103437.png" alt="Winner" /> : null}
+                      </span>
+                    )}
+                  </h3>
+                  <div className="game-type">
+                    <img
+                      src={getGameTypeIcon(r.match_type)}
+                      alt={r.match_type || "Unknown"}
+                      style={{
+                        transform:
+                          (r.match_type || "unknown").toLowerCase() === "private"
+                            ? "scaleX(-1)"
+                            : (r.match_type || "unknown").toLowerCase() === "ranked"
+                              ? "scale(1.15)"
+                              : "none"
+                      }}
+                    />
+                    <span
+                      className="game-type-label"
+                      style={{ fontSize: (r.match_type || "unknown").length > 6 ? "10px" : "11px" }}
+                    >
+                      {(r.match_type || "unknown").toUpperCase()}
+                    </span>
+                  </div>
+                </div>
+                <div className="muted">Matchup: {r.pack || "Unknown"} vs {r.opponent_pack || "Unknown"}</div>
+                <div className="replay-image-wrap">
+                  <img
+                    className="replay-image"
+                    src={`/api/replays/${r.id}/image?v=${encodeURIComponent(r.created_at || replayImageVersion)}`}
+                    alt="Replay"
+                    onLoad={(e) => e.currentTarget.closest(".replay-image-wrap")?.classList.add("loaded")}
+                    onError={(e) => e.currentTarget.closest(".replay-image-wrap")?.classList.add("loaded")}
+                  />
+                </div>
               </div>
-            </div>
+            )
           ))}
         </div>
-        <div className="pagination">
-          <button disabled={page <= 1} onClick={() => runSearch(null, page - 1)}>Prev</button>
-          <div className="page-info">Page {page} / {totalPages}</div>
-          <button disabled={page >= totalPages} onClick={() => runSearch(null, page + 1)}>Next</button>
-        </div>
+        {exploreViewMode === "list" ? (
+          <div className="infinite-footer">
+            <div className="page-info">{results.length} / {total}</div>
+            <div ref={listSentinelRef} className="list-sentinel" />
+            {searchLoading && results.length < total ? <div className="muted">Loading more...</div> : null}
+          </div>
+        ) : (
+          <div className="pagination">
+            <button disabled={page <= 1 || searchLoading} onClick={() => runSearch(null, page - 1)}>Prev</button>
+            <div className="page-info">Page {page} / {totalPages}</div>
+            <button disabled={page >= totalPages || searchLoading} onClick={() => runSearch(null, page + 1)}>Next</button>
+          </div>
+        )}
       </section>
 
       {modalOpen && (
-        <div className="modal-backdrop" onClick={() => setModalOpen(false)}>
+        <div className="modal-backdrop" onClick={closeModal}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-head">
               <h3>Replay Details</h3>
-              <button className="ghost" type="button" onClick={() => setModalOpen(false)}>Close</button>
+              <div className="modal-head-actions">
+                <button className="ghost" type="button" onClick={copyReplayShareLink}>Share</button>
+                <button className="ghost" type="button" onClick={closeModal}>Close</button>
+              </div>
             </div>
+            {modalShareStatus ? <div className="status">{modalShareStatus}</div> : null}
             {modalLoading && <div className="muted">Loading...</div>}
             {!modalLoading && modalData?.error && <div className="muted">{modalData.error}</div>}
             {!modalLoading && modalData?.replay && (

@@ -351,10 +351,10 @@ export async function GET(req) {
     );
   }
 
-  const where = clauses.length ? `where ${clauses.join(" and ")}` : "";
-  const baseSql = `from replays r ${where}`;
+  const fromSql = `from replays r`;
+  const whereSql = clauses.length ? `where ${clauses.join(" and ")}` : "";
 
-  const countSql = `select count(*) as total ${baseSql}`;
+  const countSql = `select count(*) as total ${fromSql} ${whereSql}`;
   const countValues = values.slice();
   const countResult = await pool.query(countSql, countValues);
   const total = Number(countResult.rows[0]?.total || 0);
@@ -362,8 +362,16 @@ export async function GET(req) {
   values.push(pageSize, offset);
   const dataSql = `
     select r.id, r.participation_id, r.player_name, r.opponent_name, r.pack, r.opponent_pack, r.game_version, r.match_type, r.mode,
-           r.max_player_count, r.active_player_count, r.created_at, r.tags
-    ${baseSql}
+           r.max_player_count, r.active_player_count, r.created_at, r.tags, lt.outcome as last_outcome
+    ${fromSql}
+    left join lateral (
+      select t.outcome
+      from turns t
+      where t.replay_id = r.id
+      order by t.turn_number desc
+      limit 1
+    ) lt on true
+    ${whereSql}
     order by ${sortColumn} ${order}
     limit $${values.length - 1} offset $${values.length}
   `;
