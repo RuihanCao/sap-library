@@ -21,6 +21,7 @@ export async function GET(req) {
   const minRank = minRankRaw !== null && minRankRaw !== "" && Number.isFinite(Number(minRankRaw))
     ? Number(minRankRaw)
     : null;
+  const minRankMode = (searchParams.get("minRankMode") || "any").toLowerCase();
   const packA = searchParams.get("packA");
   const packB = searchParams.get("packB");
   const excludeA = searchParams.get("excludeA");
@@ -104,7 +105,11 @@ export async function GET(req) {
     values.push(minRank);
     const rankExprPlayer = `coalesce((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank')::int, 0)`;
     const rankExprOpponent = `coalesce((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank')::int, 0)`;
-    clauses.push(`(${rankExprPlayer} >= $${values.length} or ${rankExprOpponent} >= $${values.length})`);
+    if (minRankMode === "both") {
+      clauses.push(`(${rankExprPlayer} >= $${values.length} and ${rankExprOpponent} >= $${values.length})`);
+    } else {
+      clauses.push(`(${rankExprPlayer} >= $${values.length} or ${rankExprOpponent} >= $${values.length})`);
+    }
   }
 
   if (packA && packB) {

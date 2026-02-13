@@ -7,6 +7,63 @@ const { rateLimit, applyRateLimitHeaders, rateLimitResponse } = require("@/lib/r
 
 export const runtime = "nodejs";
 
+function extractParticipationId(input) {
+  if (input === null || input === undefined) return null;
+  const text = String(input).trim();
+  if (!text) return null;
+
+  const uuidRegex = /[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i;
+
+  if (text.startsWith("{") && text.endsWith("}")) {
+    try {
+      const parsed = JSON.parse(text);
+      const fromJson =
+        parsed?.Pid ||
+        parsed?.pid ||
+        parsed?.ParticipationId ||
+        parsed?.participationId;
+      if (fromJson && uuidRegex.test(String(fromJson))) {
+        return String(fromJson).match(uuidRegex)[0];
+      }
+    } catch {
+      // ignore and continue to other parsers
+    }
+  }
+
+  if (/^https?:\/\//i.test(text)) {
+    try {
+      const url = new URL(text);
+      const candidates = [
+        url.searchParams.get("Pid"),
+        url.searchParams.get("pid"),
+        url.searchParams.get("ParticipationId"),
+        url.searchParams.get("participationId"),
+        url.searchParams.get("participation_id")
+      ].filter(Boolean);
+
+      for (const candidate of candidates) {
+        const match = String(candidate).match(uuidRegex);
+        if (match) return match[0];
+      }
+
+      const hashMatch = decodeURIComponent(url.hash || "").match(uuidRegex);
+      if (hashMatch) return hashMatch[0];
+    } catch {
+      // ignore and continue to regex fallback
+    }
+  }
+
+  const keyedMatch = text.match(
+    /(?:^|[?&#])(?:pid|Pid|participationId|ParticipationId|participation_id)=([0-9a-f-]{36})/i
+  );
+  if (keyedMatch) return keyedMatch[1];
+
+  const plainMatch = text.match(uuidRegex);
+  if (plainMatch) return plainMatch[0];
+
+  return null;
+}
+
 async function fetchReplay(participationId) {
   const token = await getAuthToken();
   const url = `https://api.teamwood.games/0.${API_VERSION}/api/playback/participation`;
@@ -52,19 +109,9 @@ export async function POST(req) {
     return NextResponse.json({ error: "participationId required" }, { status: 400 });
   }
 
-  let participationId = rawParticipationId;
-  if (typeof participationId === "string") {
-    const trimmed = participationId.trim();
-    if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
-      try {
-        const parsed = JSON.parse(trimmed);
-        if (parsed && parsed.Pid) {
-          participationId = parsed.Pid;
-        }
-      } catch {
-        // ignore, keep as-is
-      }
-    }
+  const participationId = extractParticipationId(rawParticipationId);
+  if (!participationId) {
+    return NextResponse.json({ error: "valid participationId required" }, { status: 400 });
   }
 
   const client = await pool.connect();

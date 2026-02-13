@@ -1,5 +1,6 @@
-﻿import { NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { pool } from "@/lib/db";
+import { POST as ingestReplayPost } from "../route";
 
 export const runtime = "nodejs";
 
@@ -153,3 +154,19 @@ export async function PATCH(req, context) {
     client.release();
   }
 }
+
+export async function POST(req, context) {
+  const params = await context?.params;
+  const { id } = params || {};
+  if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
+
+  const forwardReq = new Request(new URL("/api/replays", req.url), {
+    method: "POST",
+    headers: req.headers,
+    body: JSON.stringify({ participationId: decodeURIComponent(id) })
+  });
+
+  return ingestReplayPost(forwardReq);
+}
+
+

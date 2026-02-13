@@ -279,6 +279,7 @@ const DEFAULT_FILTERS = {
   playerId: "",
   opponent: "",
   minRank: "",
+  minRankMode: "any",
   packA: "",
   packB: "",
   excludeA: "",
@@ -418,7 +419,10 @@ export default function Page() {
       if (filtersValue.player) params.set("player", filtersValue.player);
       if (filtersValue.playerId) params.set("playerId", filtersValue.playerId);
       if (filtersValue.opponent) params.set("opponent", filtersValue.opponent);
-      if (filtersValue.minRank) params.set("minRank", filtersValue.minRank);
+      if (filtersValue.minRank) {
+        params.set("minRank", filtersValue.minRank);
+        params.set("minRankMode", filtersValue.minRankMode || "any");
+      }
     }
     if (enabledValue.matchup) {
       if (filtersValue.packA) params.set("packA", filtersValue.packA);
@@ -504,6 +508,7 @@ export default function Page() {
     assignText("playerId");
     assignText("opponent");
     assignText("minRank");
+    assignText("minRankMode");
     assignText("packA");
     assignText("packB");
     assignText("excludeA");
@@ -607,7 +612,7 @@ export default function Page() {
     setEnabled((prev) => {
       const next = { ...prev, [key]: !prev[key] };
         if (!next[key]) {
-        if (key === "player") setFilters((f) => ({ ...f, player: "", playerId: "", opponent: "", minRank: "" }));
+        if (key === "player") setFilters((f) => ({ ...f, player: "", playerId: "", opponent: "", minRank: "", minRankMode: "any" }));
         if (key === "matchup") setFilters((f) => ({ ...f, packA: "", packB: "", mirrorMatch: false }));
         if (key === "pets") setSelectedPets([]);
         if (key === "perks") setSelectedPerks([]);
@@ -1102,6 +1107,16 @@ export default function Page() {
                     value={filters.minRank}
                     onChange={(e) => setFilters({ ...filters, minRank: e.target.value })}
                   />
+                </div>
+                <div className="field">
+                  <label>Min Rank Applies To</label>
+                  <select
+                    value={filters.minRankMode}
+                    onChange={(e) => setFilters({ ...filters, minRankMode: e.target.value })}
+                  >
+                    <option value="any">At least one player</option>
+                    <option value="both">Both players</option>
+                  </select>
                 </div>
               </>
             )}
