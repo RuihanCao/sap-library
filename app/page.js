@@ -278,6 +278,7 @@ const DEFAULT_FILTERS = {
   player: "",
   playerId: "",
   opponent: "",
+  minRank: "",
   packA: "",
   packB: "",
   excludeA: "",
@@ -417,6 +418,7 @@ export default function Page() {
       if (filtersValue.player) params.set("player", filtersValue.player);
       if (filtersValue.playerId) params.set("playerId", filtersValue.playerId);
       if (filtersValue.opponent) params.set("opponent", filtersValue.opponent);
+      if (filtersValue.minRank) params.set("minRank", filtersValue.minRank);
     }
     if (enabledValue.matchup) {
       if (filtersValue.packA) params.set("packA", filtersValue.packA);
@@ -501,6 +503,7 @@ export default function Page() {
     assignText("player");
     assignText("playerId");
     assignText("opponent");
+    assignText("minRank");
     assignText("packA");
     assignText("packB");
     assignText("excludeA");
@@ -542,7 +545,7 @@ export default function Page() {
         if (key in nextEnabled) nextEnabled[key] = true;
       }
     } else {
-      nextEnabled.player = Boolean(nextFilters.player || nextFilters.playerId || nextFilters.opponent);
+      nextEnabled.player = Boolean(nextFilters.player || nextFilters.playerId || nextFilters.opponent || nextFilters.minRank);
       nextEnabled.matchup = Boolean(nextFilters.packA || nextFilters.packB || nextFilters.mirrorMatch);
       nextEnabled.pets = Boolean(nextSelectedPets.length);
       nextEnabled.perks = Boolean(nextSelectedPerks.length);
@@ -603,8 +606,8 @@ export default function Page() {
   function toggleFilter(key) {
     setEnabled((prev) => {
       const next = { ...prev, [key]: !prev[key] };
-      if (!next[key]) {
-        if (key === "player") setFilters((f) => ({ ...f, player: "", playerId: "", opponent: "" }));
+        if (!next[key]) {
+        if (key === "player") setFilters((f) => ({ ...f, player: "", playerId: "", opponent: "", minRank: "" }));
         if (key === "matchup") setFilters((f) => ({ ...f, packA: "", packB: "", mirrorMatch: false }));
         if (key === "pets") setSelectedPets([]);
         if (key === "perks") setSelectedPerks([]);
@@ -1090,6 +1093,14 @@ export default function Page() {
                     placeholder="Second player name"
                     value={filters.opponent}
                     onChange={(e) => setFilters({ ...filters, opponent: e.target.value })}
+                  />
+                </div>
+                <div className="field">
+                  <label>Min Rank</label>
+                  <input
+                    placeholder="1500"
+                    value={filters.minRank}
+                    onChange={(e) => setFilters({ ...filters, minRank: e.target.value })}
                   />
                 </div>
               </>
@@ -1622,12 +1633,15 @@ export default function Page() {
                         {modalData.replay.player_name || "Unknown Player"}
                       </button>
                     </h4>
+                    <div className="stat">
+                      <span className="label">Rank</span>
+                      <span>{modalData.replay.player_rank ?? "?"}</span>
+                    </div>
                     <div className="stat" onClick={maybeUnlockTags} role="button" tabIndex={0} onKeyDown={(e) => e.key === "Enter" && maybeUnlockTags(e)}>
                       <span className="label">Gold Spent</span>
                       <span>{modalData.stats?.player_gold_spent ?? "?"}</span>
                     </div>
                     <div className="stat"><span className="label">Rolls</span><span>{modalData.stats?.player_rolls ?? "?"}</span></div>
-                    <div className="stat"><span className="label">Unspent Gold</span><span>{modalData.stats?.player_unspent_gold ?? "?"}</span></div>
                   </div>
                   {!isArena(modalData.replay.match_type) && !isMulti(modalData.replay) && (
                     <div className={`modal-side ${modalData.stats?.last_outcome === 2 ? "winner" : ""}`}>
@@ -1641,12 +1655,15 @@ export default function Page() {
                           {modalData.replay.opponent_name || "Unknown"}
                         </button>
                       </h4>
+                      <div className="stat">
+                        <span className="label">Rank</span>
+                        <span>{modalData.replay.opponent_rank ?? "?"}</span>
+                      </div>
                       <div className="stat" onClick={maybeUnlockTags} role="button" tabIndex={0} onKeyDown={(e) => e.key === "Enter" && maybeUnlockTags(e)}>
                         <span className="label">Gold Spent</span>
                         <span>{modalData.stats?.opponent_gold_spent ?? "?"}</span>
                       </div>
                       <div className="stat"><span className="label">Rolls</span><span>{modalData.stats?.opponent_rolls ?? "?"}</span></div>
-                      <div className="stat"><span className="label">Unspent Gold</span><span>{modalData.stats?.opponent_unspent_gold ?? "?"}</span></div>
                     </div>
                   )}
                 </div>

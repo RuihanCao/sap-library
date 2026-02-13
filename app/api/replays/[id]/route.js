@@ -67,16 +67,20 @@ export async function GET(_req, context) {
       [id]
     );
 
-    let playerUnspentGold = null;
-    let opponentUnspentGold = null;
     let playerId = null;
     let opponentId = null;
+    let playerRank = null;
+    let opponentRank = null;
     try {
       const raw = replayRes.rows[0].raw_json;
       playerId = raw?.UserId || null;
       try {
         const modeModel = raw?.GenesisModeModel ? JSON.parse(raw.GenesisModeModel) : null;
         opponentId = modeModel?.Opponents?.[0]?.UserId || null;
+        const parsedPlayerRank = modeModel?.Rank;
+        const parsedOpponentRank = modeModel?.Opponents?.[0]?.Rank;
+        playerRank = Number.isFinite(parsedPlayerRank) ? parsedPlayerRank : null;
+        opponentRank = Number.isFinite(parsedOpponentRank) ? parsedOpponentRank : null;
       } catch {
         // ignore
       }
@@ -84,23 +88,27 @@ export async function GET(_req, context) {
       const battles = actions
         .filter((a) => a.Type === 0)
         .map((a) => JSON.parse(a.Battle));
+      if (playerRank === null || opponentRank === null) {
+        for (let i = actions.length - 1; i >= 0; i -= 1) {
+          const action = actions[i];
+          if (action?.Type !== 1 || !action?.Mode) continue;
+          try {
+            const mode = typeof action.Mode === "string" ? JSON.parse(action.Mode) : action.Mode;
+            if (playerRank === null && Number.isFinite(mode?.Rank)) {
+              playerRank = mode.Rank;
+            }
+            if (opponentRank === null && Number.isFinite(mode?.Opponents?.[0]?.Rank)) {
+              opponentRank = mode.Opponents[0].Rank;
+            }
+            if (playerRank !== null && opponentRank !== null) break;
+          } catch {
+            // ignore
+          }
+        }
+      }
       if (!opponentId) {
         opponentId = battles?.[0]?.Opponent?.Id || null;
       }
-      let pTotal = 0;
-      let oTotal = 0;
-      for (const battle of battles) {
-        const pBoard = battle?.UserBoard;
-        const oBoard = battle?.OpponentBoard;
-        const pGo = Number.isFinite(pBoard?.Go) ? pBoard.Go : null;
-        const pSpent = Number.isFinite(pBoard?.GoSp) ? pBoard.GoSp : null;
-        const oGo = Number.isFinite(oBoard?.Go) ? oBoard.Go : null;
-        const oSpent = Number.isFinite(oBoard?.GoSp) ? oBoard.GoSp : null;
-        if (pGo !== null && pSpent !== null) pTotal += Math.max(0, pGo - pSpent);
-        if (oGo !== null && oSpent !== null) oTotal += Math.max(0, oGo - oSpent);
-      }
-      playerUnspentGold = pTotal;
-      opponentUnspentGold = oTotal;
     } catch {
       // ignore
     }
@@ -110,12 +118,12 @@ export async function GET(_req, context) {
         ...replayRes.rows[0],
         player_id: playerId,
         opponent_id: opponentId,
+        player_rank: playerRank,
+        opponent_rank: opponentRank,
         raw_json: undefined
       },
       stats: {
-        ...(statsRes.rows[0] || { turns: 0, last_turn: null, last_outcome: null }),
-        player_unspent_gold: playerUnspentGold,
-        opponent_unspent_gold: opponentUnspentGold
+        ...(statsRes.rows[0] || { turns: 0, last_turn: null, last_outcome: null })
       }
     });
   } finally {

@@ -17,6 +17,10 @@ export async function GET(req) {
   const player = searchParams.get("player");
   const playerId = searchParams.get("playerId");
   const opponent = searchParams.get("opponent");
+  const minRankRaw = searchParams.get("minRank");
+  const minRank = minRankRaw !== null && minRankRaw !== "" && Number.isFinite(Number(minRankRaw))
+    ? Number(minRankRaw)
+    : null;
   const packA = searchParams.get("packA");
   const packB = searchParams.get("packB");
   const excludeA = searchParams.get("excludeA");
@@ -94,6 +98,13 @@ export async function GET(req) {
   if (opponent) {
     values.push(`%${opponent}%`);
     clauses.push(`(r.player_name ilike $${values.length} or r.opponent_name ilike $${values.length})`);
+  }
+
+  if (minRank !== null) {
+    values.push(minRank);
+    const rankExprPlayer = `coalesce((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank')::int, 0)`;
+    const rankExprOpponent = `coalesce((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank')::int, 0)`;
+    clauses.push(`(${rankExprPlayer} >= $${values.length} or ${rankExprOpponent} >= $${values.length})`);
   }
 
   if (packA && packB) {
