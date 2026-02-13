@@ -422,7 +422,6 @@ export async function GET(req) {
           (select count(*) from combined_pet_end pe join outcomes o on o.replay_id = pe.id where pe.pet_name = pl.pet_name and o.outcome = 3)::int as draws_end
         from combined_pet_list pl
         order by (select count(*) from combined_pet_any pa where pa.pet_name = pl.pet_name) desc, pl.pet_name asc
-        limit 50
       ) pet_stats) as pet_stats,
       (select coalesce(json_agg(row_to_json(perk_stats)), '[]'::json) from (
         select
@@ -439,7 +438,6 @@ export async function GET(req) {
           (select count(*) from combined_perk_end pe join outcomes o on o.replay_id = pe.id where pe.perk_name = pl.perk_name and o.outcome = 3)::int as draws_end
         from combined_perk_list pl
         order by (select count(*) from combined_perk_any pa where pa.perk_name = pl.perk_name) desc, pl.perk_name asc
-        limit 50
       ) perk_stats) as perk_stats,
       (select coalesce(json_agg(row_to_json(toy_stats)), '[]'::json) from (
         select
@@ -456,7 +454,6 @@ export async function GET(req) {
           (select count(*) from combined_toy_end te join outcomes o on o.replay_id = te.id where te.toy_name = tl.toy_name and o.outcome = 3)::int as draws_end
         from combined_toy_list tl
         order by (select count(*) from combined_toy_any ta where ta.toy_name = tl.toy_name) desc, tl.toy_name asc
-        limit 50
       ) toy_stats) as toy_stats
   `;
 
@@ -567,7 +564,6 @@ export async function GET(req) {
         from pet_rounds pr
         group by pr.pet_name
         order by count(*) desc, pr.pet_name asc
-        limit 50
       ) pet_stats) as pet_stats,
       (select coalesce(json_agg(row_to_json(perk_stats)), '[]'::json) from (
         select
@@ -582,7 +578,6 @@ export async function GET(req) {
         from perk_rounds pr
         group by pr.perk_name
         order by count(*) desc, pr.perk_name asc
-        limit 50
       ) perk_stats) as perk_stats,
       (select coalesce(json_agg(row_to_json(toy_stats)), '[]'::json) from (
         select
@@ -597,7 +592,6 @@ export async function GET(req) {
         from toy_rounds tr
         group by tr.toy_name
         order by count(*) desc, tr.toy_name asc
-        limit 50
       ) toy_stats) as toy_stats
   `;
 

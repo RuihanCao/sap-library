@@ -1066,7 +1066,11 @@ export default function StatsPage() {
               label=""
               options={petOptions}
               selected={filters.pet}
-              onChange={(value) => setFilters({ ...filters, pet: value })}
+              onChange={(value) => {
+                const next = { ...filters, pet: value };
+                setFilters(next);
+                loadStats(next);
+              }}
               placeholder="Search pets..."
             />
           </div>
@@ -1162,7 +1166,11 @@ export default function StatsPage() {
               label="Perk Search"
               options={perkOptions}
               selected={filters.perk}
-              onChange={(value) => setFilters({ ...filters, perk: value })}
+              onChange={(value) => {
+                const next = { ...filters, perk: value };
+                setFilters(next);
+                loadStats(next);
+              }}
               placeholder="Search perks and add"
             />
           </div>
@@ -1258,7 +1266,11 @@ export default function StatsPage() {
               label="Toy Search"
               options={toyOptions}
               selected={filters.toy}
-              onChange={(value) => setFilters({ ...filters, toy: value })}
+              onChange={(value) => {
+                const next = { ...filters, toy: value };
+                setFilters(next);
+                loadStats(next);
+              }}
               placeholder="Search toys and add"
             />
           </div>

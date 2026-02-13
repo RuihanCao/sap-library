@@ -1,3 +1,11 @@
 .env
 .env.local
 node_modules
+
+# Next.js / build output
+.next/
+out/
+build/
+dist/
+coverage/
+*.tsbuildinfo
