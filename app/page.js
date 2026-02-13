@@ -983,6 +983,7 @@ export default function Page() {
       <div className="top-nav">
         <Link href="/" className="nav-link active">Explorer</Link>
         <Link href="/stats" className="nav-link">Stats</Link>
+        <Link href="/leaderboard" className="nav-link">Leaderboard</Link>
       </div>
       <header className="hero">
         <div className="hero-copy">

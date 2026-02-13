@@ -753,6 +753,7 @@ export default function StatsPage() {
       <div className="top-nav">
         <Link href="/" className="nav-link">Explorer</Link>
         <Link href="/stats" className="nav-link active">Stats</Link>
+        <Link href="/leaderboard" className="nav-link">Leaderboard</Link>
       </div>
 
       <header className="hero">
