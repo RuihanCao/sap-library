@@ -1,7 +1,7 @@
 ﻿import "./globals.css";
 
 export const metadata = {
-  title: "SAP Replay Explorer",
+  title: "Sap Library",
   description: "Ingest and search Super Auto Pets replays",
   icons: {
     icon: [

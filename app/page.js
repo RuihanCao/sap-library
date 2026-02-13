@@ -882,7 +882,7 @@ export default function Page() {
       </div>
       <header className="hero">
         <div className="hero-copy">
-          <h1>SAP Replay Explorer</h1>
+          <h1>Sap Library</h1>
           <p>Upload replays, explore matchups, and search by any metric you could need.</p>
         </div>
       </header>
