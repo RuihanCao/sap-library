@@ -79,10 +79,12 @@ export async function POST(req) {
       try {
         const raw = await fetchReplay(participationId);
         const parsed = parseReplay(raw);
-        if (parsed.matchId) {
+        const normalizedMatchId =
+          (parsed.matchType || "").toLowerCase() === "arena" ? null : parsed.matchId;
+        if (normalizedMatchId) {
           const existingMatch = await client.query(
             "select id from replays where match_id=$1",
-            [parsed.matchId]
+            [normalizedMatchId]
           );
           if (existingMatch.rowCount) {
             skipped += 1;
@@ -98,7 +100,7 @@ export async function POST(req) {
            returning id`,
           [
             participationId,
-            parsed.matchId,
+            normalizedMatchId,
             parsed.playerName,
             parsed.opponentName,
             parsed.packName,
@@ -120,10 +122,10 @@ export async function POST(req) {
             continue;
           }
 
-          if (parsed.matchId) {
+          if (normalizedMatchId) {
             const byMatch = await client.query(
               "select id from replays where match_id=$1 limit 1",
-              [parsed.matchId]
+              [normalizedMatchId]
             );
             if (byMatch.rowCount) {
               skipped += 1;

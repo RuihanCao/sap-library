@@ -84,11 +84,13 @@ export async function POST(req) {
 
     const raw = await fetchReplay(participationId);
     const parsed = parseReplay(raw);
+    const normalizedMatchId =
+      (parsed.matchType || "").toLowerCase() === "arena" ? null : parsed.matchId;
 
-    if (parsed.matchId) {
+    if (normalizedMatchId) {
       const existingMatch = await client.query(
         "select id from replays where match_id=$1",
-        [parsed.matchId]
+        [normalizedMatchId]
       );
       if (existingMatch.rowCount) {
         const res = NextResponse.json({
@@ -123,7 +125,7 @@ export async function POST(req) {
        returning id`,
       [
         participationId,
-        parsed.matchId,
+        normalizedMatchId,
         parsed.playerName,
         parsed.opponentName,
         parsed.packName,
@@ -154,10 +156,10 @@ export async function POST(req) {
         return applyRateLimitHeaders(res, limitInfo);
       }
 
-      if (parsed.matchId) {
+      if (normalizedMatchId) {
         const existingByMatch = await client.query(
           "select id from replays where match_id=$1 limit 1",
-          [parsed.matchId]
+          [normalizedMatchId]
         );
         if (existingByMatch.rowCount) {
           const res = NextResponse.json({

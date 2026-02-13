@@ -26,11 +26,6 @@
       "static/chunks/main-app.js",
       "static/chunks/app/api/search/route.js"
     ],
-    "/api/replays/[id]/route": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/api/replays/[id]/route.js"
-    ],
     "/api/replays/[id]/image/route": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",

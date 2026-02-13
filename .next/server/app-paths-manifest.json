@@ -1,4 +1,7 @@
 {
-  "/stats/page": "app/stats/page.js",
-  "/page": "app/page.js"
+  "/api/stats/route": "app/api/stats/route.js",
+  "/api/replays/[id]/image/route": "app/api/replays/[id]/image/route.js",
+  "/api/search/route": "app/api/search/route.js",
+  "/page": "app/page.js",
+  "/stats/page": "app/stats/page.js"
 }

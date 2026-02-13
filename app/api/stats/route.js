@@ -54,13 +54,19 @@ export async function GET(req) {
   ];
   values.push(EXCLUDED_PACKS);
 
-  if (pack) {
+  if (pack && opponentPack) {
+    values.push(pack, opponentPack);
+    const a = values.length - 1;
+    const b = values.length;
+    clauses.push(
+      `((r.pack = $${a} and r.opponent_pack = $${b}) or (r.pack = $${b} and r.opponent_pack = $${a}))`
+    );
+  } else if (pack) {
     values.push(pack);
-    clauses.push(`r.pack = $${values.length}`);
-  }
-  if (opponentPack) {
+    clauses.push(`(r.pack = $${values.length} or r.opponent_pack = $${values.length})`);
+  } else if (opponentPack) {
     values.push(opponentPack);
-    clauses.push(`r.opponent_pack = $${values.length}`);
+    clauses.push(`(r.pack = $${values.length} or r.opponent_pack = $${values.length})`);
   }
   if (player) {
     values.push(`%${player}%`);
