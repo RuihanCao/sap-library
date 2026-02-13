@@ -1330,6 +1330,14 @@ button:hover:not(:disabled) {
   cursor: pointer;
 }
 
+.leaderboard-table.scope-game .leaderboard-row {
+  grid-template-columns: minmax(220px, 1.3fr) repeat(7, minmax(80px, 0.75fr));
+}
+
+.leaderboard-table.scope-game .col-draw {
+  display: none;
+}
+
 .leaderboard-row:hover:not(.leaderboard-head) {
   background: rgba(255, 255, 255, 0.95);
 }
@@ -1409,8 +1417,12 @@ button:hover:not(:disabled) {
   font-size: 13px;
 }
 
-.leaderboard-subrow.matchup {
+.leaderboard-subrow.matchup.battle {
   grid-template-columns: minmax(170px, 1.2fr) repeat(5, minmax(80px, 0.7fr));
+}
+
+.leaderboard-subrow.matchup.game {
+  grid-template-columns: minmax(170px, 1.2fr) repeat(4, minmax(80px, 0.7fr));
 }
 
 .leaderboard-subrow.turn {
@@ -1516,6 +1528,16 @@ button:hover:not(:disabled) {
   .leaderboard-row > :nth-child(9) { grid-area: avggold; }
 
   .leaderboard-head {
+    display: none;
+  }
+
+  .leaderboard-table.scope-game .leaderboard-row {
+    grid-template-areas:
+      "player games rounds wins losses"
+      "player winrate avgrolls avggold avggold";
+  }
+
+  .leaderboard-table.scope-game .leaderboard-row > :nth-child(6) {
     display: none;
   }
 

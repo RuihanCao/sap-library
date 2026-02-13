@@ -219,6 +219,7 @@ export default function LeaderboardPage() {
   const [selectedPlayerId, setSelectedPlayerId] = useState("");
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [detailModalOpen, setDetailModalOpen] = useState(false);
 
   const totalPages = Math.max(1, Math.ceil(total / Number(filters.pageSize || 25)));
   const packOptions = useMemo(
@@ -358,8 +359,19 @@ export default function LeaderboardPage() {
 
     setFilters(nextFilters);
     setSelectedPlayerId(nextPlayerId);
+    setDetailModalOpen(Boolean(nextPlayerId));
     loadLeaderboard(nextFilters, nextPage, nextPlayerId, { skipUrlSync: true });
   }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") {
+        closeDetailModal();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [filters, page]);
 
   function submitSearch(event) {
     event.preventDefault();
@@ -375,8 +387,17 @@ export default function LeaderboardPage() {
 
   function selectPlayer(playerId) {
     setSelectedPlayerId(playerId);
+    setDetailModalOpen(true);
     loadDetail(playerId);
     const nextParams = buildListParams(filters, page, playerId);
+    window.history.replaceState({}, "", `?${nextParams.toString()}`);
+  }
+
+  function closeDetailModal() {
+    setDetailModalOpen(false);
+    setSelectedPlayerId("");
+    setDetail(null);
+    const nextParams = buildListParams(filters, page, "");
     window.history.replaceState({}, "", `?${nextParams.toString()}`);
   }
 
@@ -558,14 +579,14 @@ export default function LeaderboardPage() {
           </div>
         </div>
 
-        <div className="leaderboard-table">
+        <div className={`leaderboard-table ${filters.scope === "battle" ? "scope-battle" : "scope-game"}`}>
           <div className="leaderboard-row leaderboard-head">
             <span>Player</span>
             <span>Games</span>
             <span>Rounds</span>
             <span>Wins</span>
             <span>Losses</span>
-            <span>Draws</span>
+            <span className="col-draw">Draws</span>
             <span>Winrate</span>
             <span>Avg Rolls</span>
             <span>Avg Gold</span>
@@ -585,7 +606,7 @@ export default function LeaderboardPage() {
               <span>{player.rounds}</span>
               <span>{player.wins}</span>
               <span>{player.losses}</span>
-              <span>{player.draws}</span>
+              <span className="col-draw">{player.draws}</span>
               <span>{pct(player.winrate)}</span>
               <span>{fixed(player.avgRollsPerTurn)}</span>
               <span>{fixed(player.avgGoldPerTurn)}</span>
@@ -607,151 +628,161 @@ export default function LeaderboardPage() {
         </div>
       </section>
 
-      {selectedPlayerId && (
-        <section className="section">
-          <div className="results-header">
-            <h2>Player Detail</h2>
+      {detailModalOpen && (
+        <div className="modal-backdrop" onClick={closeDetailModal}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <h3>Player Detail</h3>
+              <div className="modal-head-actions">
+                <button className="ghost" type="button" onClick={closeDetailModal}>Close</button>
+              </div>
+            </div>
+
             <div className="status">
               {detailLoading ? "Loading..." : (detail?.playerName || selectedPlayerId)}
             </div>
-          </div>
 
-          {detail && !detailLoading && (
-            <>
-              <div className="stats-summary-grid">
-                <div className="stats-summary-item">
-                  <span className="label">Player ID</span>
-                  <strong style={{ fontSize: "12px", lineHeight: 1.2 }}>{detail.playerId}</strong>
+            {detail && !detailLoading && (
+              <>
+                <div className="stats-summary-grid">
+                  <div className="stats-summary-item">
+                    <span className="label">Player ID</span>
+                    <strong style={{ fontSize: "12px", lineHeight: 1.2 }}>{detail.playerId}</strong>
+                  </div>
+                  <div className="stats-summary-item">
+                    <span className="label">Games</span>
+                    <strong>{Number(detail.summary?.games || 0)}</strong>
+                  </div>
+                  <div className="stats-summary-item">
+                    <span className="label">Rounds</span>
+                    <strong>{Number(detail.summary?.rounds || 0)}</strong>
+                  </div>
+                  <div className="stats-summary-item">
+                    <span className="label">Wins</span>
+                    <strong>{Number(detail.summary?.wins || 0)}</strong>
+                  </div>
+                  <div className="stats-summary-item">
+                    <span className="label">Losses</span>
+                    <strong>{Number(detail.summary?.losses || 0)}</strong>
+                  </div>
+                  {filters.scope === "battle" && (
+                    <div className="stats-summary-item">
+                      <span className="label">Draws</span>
+                      <strong>{Number(detail.summary?.draws || 0)}</strong>
+                    </div>
+                  )}
+                  <div className="stats-summary-item">
+                    <span className="label">Winrate</span>
+                    <strong>{pct(detail.summary?.winrate)}</strong>
+                  </div>
+                  <div className="stats-summary-item">
+                    <span className="label">Lossrate</span>
+                    <strong>{pct(detail.summary?.lossrate)}</strong>
+                  </div>
+                  {filters.scope === "battle" && (
+                    <div className="stats-summary-item">
+                      <span className="label">Drawrate</span>
+                      <strong>{pct(detail.summary?.drawrate)}</strong>
+                    </div>
+                  )}
+                  <div className="stats-summary-item">
+                    <span className="label">Avg Rolls/Turn</span>
+                    <strong>{fixed(detail.summary?.avgRollsPerTurn)}</strong>
+                  </div>
+                  <div className="stats-summary-item">
+                    <span className="label">Avg Gold/Turn</span>
+                    <strong>{fixed(detail.summary?.avgGoldPerTurn)}</strong>
+                  </div>
                 </div>
-                <div className="stats-summary-item">
-                  <span className="label">Games</span>
-                  <strong>{Number(detail.summary?.games || 0)}</strong>
-                </div>
-                <div className="stats-summary-item">
-                  <span className="label">Rounds</span>
-                  <strong>{Number(detail.summary?.rounds || 0)}</strong>
-                </div>
-                <div className="stats-summary-item">
-                  <span className="label">Wins</span>
-                  <strong>{Number(detail.summary?.wins || 0)}</strong>
-                </div>
-                <div className="stats-summary-item">
-                  <span className="label">Losses</span>
-                  <strong>{Number(detail.summary?.losses || 0)}</strong>
-                </div>
-                <div className="stats-summary-item">
-                  <span className="label">Draws</span>
-                  <strong>{Number(detail.summary?.draws || 0)}</strong>
-                </div>
-                <div className="stats-summary-item">
-                  <span className="label">Winrate</span>
-                  <strong>{pct(detail.summary?.winrate)}</strong>
-                </div>
-                <div className="stats-summary-item">
-                  <span className="label">Lossrate</span>
-                  <strong>{pct(detail.summary?.lossrate)}</strong>
-                </div>
-                <div className="stats-summary-item">
-                  <span className="label">Drawrate</span>
-                  <strong>{pct(detail.summary?.drawrate)}</strong>
-                </div>
-                <div className="stats-summary-item">
-                  <span className="label">Avg Rolls/Turn</span>
-                  <strong>{fixed(detail.summary?.avgRollsPerTurn)}</strong>
-                </div>
-                <div className="stats-summary-item">
-                  <span className="label">Avg Gold/Turn</span>
-                  <strong>{fixed(detail.summary?.avgGoldPerTurn)}</strong>
-                </div>
-              </div>
 
-              <div className="leaderboard-detail-grid">
-                <div className="leaderboard-detail-block">
-                  <h3>Pack Pickrate</h3>
-                  <div className="stats-cards">
-                    {detail.packStats?.map((row) => (
-                      <div className="stats-card" key={`pack-${row.pack}`}>
-                        <div className="stats-card-head">
-                          <h4>{row.pack}</h4>
+                <div className="leaderboard-detail-grid">
+                  <div className="leaderboard-detail-block">
+                    <h3>Pack Pickrate</h3>
+                    <div className="stats-cards">
+                      {detail.packStats?.map((row) => (
+                        <div className="stats-card" key={`pack-${row.pack}`}>
+                          <div className="stats-card-head">
+                            <h4>{row.pack}</h4>
+                          </div>
+                          <div className="stats-card-metrics">
+                            <div>{filters.scope === "battle" ? "Rounds" : "Games"}: {Number(row.rounds ?? row.games ?? 0)}</div>
+                            <div>Wins: {Number(row.wins || 0)}</div>
+                            <div>Losses: {Number(row.losses || 0)}</div>
+                            {filters.scope === "battle" && <div>Draws: {Number(row.draws || 0)}</div>}
+                            <div>Winrate: {pct(row.winrate)}</div>
+                          </div>
                         </div>
-                        <div className="stats-card-metrics">
-                          <div>{filters.scope === "battle" ? "Rounds" : "Games"}: {Number(row.rounds ?? row.games ?? 0)}</div>
-                          <div>Wins: {Number(row.wins || 0)}</div>
-                          <div>Losses: {Number(row.losses || 0)}</div>
-                          <div>Draws: {Number(row.draws || 0)}</div>
-                          <div>Winrate: {pct(row.winrate)}</div>
-                        </div>
+                      ))}
+                      {!detail.packStats?.length && <div className="stats-card empty">No pack stats.</div>}
+                    </div>
+                  </div>
+
+                  <div className="leaderboard-detail-block">
+                    <h3>Matchup Winrates</h3>
+                    <div className="leaderboard-subtable">
+                      <div className={`leaderboard-subrow matchup ${filters.scope === "battle" ? "battle" : "game"} head`}>
+                        <span>Matchup</span>
+                        <span>{filters.scope === "battle" ? "Rounds" : "Games"}</span>
+                        <span>Wins</span>
+                        <span>Losses</span>
+                        {filters.scope === "battle" && <span>Draws</span>}
+                        <span>Winrate</span>
                       </div>
-                    ))}
-                    {!detail.packStats?.length && <div className="stats-card empty">No pack stats.</div>}
+                      {detail.matchupStats?.map((row) => (
+                        <div className={`leaderboard-subrow matchup ${filters.scope === "battle" ? "battle" : "game"}`} key={`${row.pack}-${row.opponent_pack}`}>
+                          <span>{row.pack} vs {row.opponent_pack}</span>
+                          <span>{Number(row.rounds ?? row.games ?? 0)}</span>
+                          <span>{Number(row.wins || 0)}</span>
+                          <span>{Number(row.losses || 0)}</span>
+                          {filters.scope === "battle" && <span>{Number(row.draws || 0)}</span>}
+                          <span>{pct(row.winrate)}</span>
+                        </div>
+                      ))}
+                      {!detail.matchupStats?.length && (
+                        <div className="leaderboard-subrow empty">
+                          <span>No matchup stats.</span>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
 
                 <div className="leaderboard-detail-block">
-                  <h3>Matchup Winrates</h3>
+                  <h3>Per Turn Metrics</h3>
                   <div className="leaderboard-subtable">
-                    <div className="leaderboard-subrow matchup head">
-                      <span>Matchup</span>
-                      <span>{filters.scope === "battle" ? "Rounds" : "Games"}</span>
+                    <div className="leaderboard-subrow turn head">
+                      <span>Turn</span>
+                      <span>Rounds</span>
                       <span>Wins</span>
                       <span>Losses</span>
                       <span>Draws</span>
                       <span>Winrate</span>
+                      <span>Avg Rolls</span>
+                      <span>Avg Gold</span>
                     </div>
-                    {detail.matchupStats?.map((row) => (
-                      <div className="leaderboard-subrow matchup" key={`${row.pack}-${row.opponent_pack}`}>
-                        <span>{row.pack} vs {row.opponent_pack}</span>
-                        <span>{Number(row.rounds ?? row.games ?? 0)}</span>
+                    {detail.perTurn?.map((row) => (
+                      <div className="leaderboard-subrow turn" key={`turn-${row.turn_number}`}>
+                        <span>{row.turn_number}</span>
+                        <span>{Number(row.rounds || 0)}</span>
                         <span>{Number(row.wins || 0)}</span>
                         <span>{Number(row.losses || 0)}</span>
                         <span>{Number(row.draws || 0)}</span>
                         <span>{pct(row.winrate)}</span>
+                        <span>{fixed(row.avg_rolls_per_turn)}</span>
+                        <span>{fixed(row.avg_gold_per_turn)}</span>
                       </div>
                     ))}
-                    {!detail.matchupStats?.length && (
+                    {!detail.perTurn?.length && (
                       <div className="leaderboard-subrow empty">
-                        <span>No matchup stats.</span>
+                        <span>No turn-level rows.</span>
                       </div>
                     )}
                   </div>
                 </div>
-              </div>
-
-              <div className="leaderboard-detail-block">
-                <h3>Per Turn Metrics</h3>
-                <div className="leaderboard-subtable">
-                  <div className="leaderboard-subrow turn head">
-                    <span>Turn</span>
-                    <span>Rounds</span>
-                    <span>Wins</span>
-                    <span>Losses</span>
-                    <span>Draws</span>
-                    <span>Winrate</span>
-                    <span>Avg Rolls</span>
-                    <span>Avg Gold</span>
-                  </div>
-                  {detail.perTurn?.map((row) => (
-                    <div className="leaderboard-subrow turn" key={`turn-${row.turn_number}`}>
-                      <span>{row.turn_number}</span>
-                      <span>{Number(row.rounds || 0)}</span>
-                      <span>{Number(row.wins || 0)}</span>
-                      <span>{Number(row.losses || 0)}</span>
-                      <span>{Number(row.draws || 0)}</span>
-                      <span>{pct(row.winrate)}</span>
-                      <span>{fixed(row.avg_rolls_per_turn)}</span>
-                      <span>{fixed(row.avg_gold_per_turn)}</span>
-                    </div>
-                  ))}
-                  {!detail.perTurn?.length && (
-                    <div className="leaderboard-subrow empty">
-                      <span>No turn-level rows.</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </>
-          )}
-        </section>
+              </>
+            )}
+          </div>
+        </div>
       )}
     </main>
   );
