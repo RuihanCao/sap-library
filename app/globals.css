@@ -1404,11 +1404,12 @@ button:hover:not(:disabled) {
 .leaderboard-subtable {
   display: grid;
   gap: 6px;
+  overflow-x: auto;
 }
 
 .leaderboard-subrow {
   display: grid;
-  gap: 10px;
+  gap: 8px;
   align-items: center;
   border: 1px solid var(--edge);
   border-radius: 10px;
@@ -1417,16 +1418,21 @@ button:hover:not(:disabled) {
   font-size: 13px;
 }
 
+.leaderboard-subrow span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .leaderboard-subrow.matchup.battle {
-  grid-template-columns: minmax(170px, 1.2fr) repeat(5, minmax(80px, 0.7fr));
+  grid-template-columns: minmax(150px, 1.4fr) repeat(5, minmax(0, 0.9fr));
 }
 
 .leaderboard-subrow.matchup.game {
-  grid-template-columns: minmax(170px, 1.2fr) repeat(4, minmax(80px, 0.7fr));
+  grid-template-columns: minmax(150px, 1.4fr) repeat(4, minmax(0, 0.9fr));
 }
 
 .leaderboard-subrow.turn {
-  grid-template-columns: minmax(70px, 0.6fr) repeat(7, minmax(75px, 0.65fr));
+  grid-template-columns: minmax(52px, 0.6fr) repeat(7, minmax(0, 1fr));
 }
 
 .leaderboard-subrow.head {
