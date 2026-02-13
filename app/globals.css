@@ -440,8 +440,8 @@ button:hover:not(:disabled) {
 
 .list-row {
   display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 12px;
+  grid-template-columns: minmax(180px, 1fr) minmax(220px, 0.9fr) minmax(180px, 1fr) auto;
+  gap: 14px;
   align-items: center;
   background: linear-gradient(160deg, var(--surface), var(--panel));
   border: 1px solid var(--edge);
@@ -455,31 +455,78 @@ button:hover:not(:disabled) {
   outline-offset: 2px;
 }
 
-.list-main {
+.list-player {
   display: grid;
   gap: 4px;
   min-width: 0;
 }
 
-.list-title {
-  display: flex;
+.list-player-name {
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   font-size: 16px;
   color: var(--ink);
   min-width: 0;
-  flex-wrap: wrap;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
 }
 
-.list-meta {
+.list-player-rank {
   color: var(--muted);
-  font-size: 13px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.list-player-right {
+  justify-items: end;
+}
+
+.list-matchup-col {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+}
+
+.list-pack-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.list-matchup-sub {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+
+.pack-pill {
+  padding: 3px 8px;
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.65);
+  font-size: 12px;
+  line-height: 1.1;
+}
+
+.pack-pill.winner-pack {
+  border-color: rgba(255, 215, 120, 0.9);
+  background: rgba(255, 245, 198, 0.95);
+  box-shadow: 0 0 0 1px rgba(255, 232, 160, 0.65), 0 0 10px rgba(255, 218, 120, 0.45);
+}
+
+.winner-side .list-player-name {
+  color: var(--ink);
+  font-weight: 700;
 }
 
 .list-time {
   color: var(--muted);
   font-size: 12px;
   white-space: nowrap;
+  justify-self: end;
 }
 
 .vs-line {
@@ -1072,6 +1119,14 @@ button:hover:not(:disabled) {
   .list-row {
     grid-template-columns: 1fr;
     gap: 6px;
+  }
+
+  .list-player-right {
+    justify-items: start;
+  }
+
+  .list-matchup-col {
+    justify-items: start;
   }
 
   .list-time {

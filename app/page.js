@@ -1480,8 +1480,12 @@ export default function Page() {
           </div>
         </div>
         <div className={exploreViewMode === "list" ? "results list-view" : "results"}>
-          {results.map((r) => (
-            exploreViewMode === "list" ? (
+          {results.map((r) => {
+            const worldOpponent = isArena(r.match_type) || isMulti(r);
+            const playerWon = Number(r.last_outcome) === 1;
+            const opponentWon = Number(r.last_outcome) === 2;
+
+            return exploreViewMode === "list" ? (
               <div
                 className="list-row"
                 key={r.id}
@@ -1490,20 +1494,31 @@ export default function Page() {
                 onClick={() => openModal(r.id)}
                 onKeyDown={(e) => e.key === "Enter" && openModal(r.id)}
               >
-                <div className="list-main">
-                  <div className="list-title">
-                    {Number(r.last_outcome) === 1 ? <img className="winner-trophy-inline" src="/Sprite/Cosmetic/Trophy_2x%20%23103437.png" alt="Winner" /> : null}
+                <div className={`list-player ${playerWon ? "winner-side" : ""}`}>
+                  <div className="list-player-name">
                     <span>{r.player_name || "Unknown Player"}</span>
-                    <span className="vs-line">vs</span>
-                    {Number(r.last_outcome) === 2 ? <img className="winner-trophy-inline" src="/Sprite/Cosmetic/Trophy_2x%20%23103437.png" alt="Winner" /> : null}
-                    <span className={isArena(r.match_type) || isMulti(r) ? "world-name" : ""}>
-                      {isArena(r.match_type) || isMulti(r) ? "The World" : (r.opponent_name || "Unknown")}
-                    </span>
+                    {playerWon ? <img className="winner-trophy-inline" src="/Sprite/Cosmetic/Trophy_2x%20%23103437.png" alt="Winner" /> : null}
                   </div>
-                  <div className="list-meta">
-                    {r.pack || "Unknown"} vs {r.opponent_pack || "Unknown"} • {(r.match_type || "unknown").toUpperCase()}
-                  </div>
+                  <div className="list-player-rank">Rank {r.player_rank ?? "?"}</div>
                 </div>
+
+                <div className="list-matchup-col">
+                  <div className="list-pack-line">
+                    <span className={`pack-pill ${playerWon ? "winner-pack" : ""}`}>{r.pack || "Unknown"}</span>
+                    <span className="vs-line">vs</span>
+                    <span className={`pack-pill ${opponentWon ? "winner-pack" : ""}`}>{r.opponent_pack || "Unknown"}</span>
+                  </div>
+                  <div className="list-matchup-sub">{(r.match_type || "unknown").toUpperCase()}</div>
+                </div>
+
+                <div className={`list-player list-player-right ${opponentWon ? "winner-side" : ""}`}>
+                  <div className={`list-player-name ${worldOpponent ? "world-name" : ""}`}>
+                    <span>{worldOpponent ? "The World" : (r.opponent_name || "Unknown")}</span>
+                    {opponentWon ? <img className="winner-trophy-inline" src="/Sprite/Cosmetic/Trophy_2x%20%23103437.png" alt="Winner" /> : null}
+                  </div>
+                  <div className="list-player-rank">Rank {worldOpponent ? "—" : (r.opponent_rank ?? "?")}</div>
+                </div>
+
                 <div className="list-time">
                   {r.created_at ? new Date(r.created_at).toLocaleDateString() : ""}
                 </div>
@@ -1514,18 +1529,18 @@ export default function Page() {
                   <h3>
                     <span className="name-line winner-line">
                       {r.player_name || "Unknown Player"}
-                      {Number(r.last_outcome) === 1 ? <img className="winner-trophy-inline" src="/Sprite/Cosmetic/Trophy_2x%20%23103437.png" alt="Winner" /> : null}
+                      {playerWon ? <img className="winner-trophy-inline" src="/Sprite/Cosmetic/Trophy_2x%20%23103437.png" alt="Winner" /> : null}
                     </span>
                     <span className="name-line vs-line">vs</span>
-                    {isArena(r.match_type) || isMulti(r) ? (
+                    {worldOpponent ? (
                       <span className="name-line world-name winner-line">
                         The World
-                        {Number(r.last_outcome) === 2 ? <img className="winner-trophy-inline" src="/Sprite/Cosmetic/Trophy_2x%20%23103437.png" alt="Winner" /> : null}
+                        {opponentWon ? <img className="winner-trophy-inline" src="/Sprite/Cosmetic/Trophy_2x%20%23103437.png" alt="Winner" /> : null}
                       </span>
                     ) : (
                       <span className="name-line winner-line">
                         {r.opponent_name || "Unknown"}
-                        {Number(r.last_outcome) === 2 ? <img className="winner-trophy-inline" src="/Sprite/Cosmetic/Trophy_2x%20%23103437.png" alt="Winner" /> : null}
+                        {opponentWon ? <img className="winner-trophy-inline" src="/Sprite/Cosmetic/Trophy_2x%20%23103437.png" alt="Winner" /> : null}
                       </span>
                     )}
                   </h3>
@@ -1561,8 +1576,8 @@ export default function Page() {
                   />
                 </div>
               </div>
-            )
-          ))}
+            );
+          })}
         </div>
         {exploreViewMode === "list" ? (
           <div className="infinite-footer">

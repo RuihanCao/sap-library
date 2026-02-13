@@ -378,7 +378,9 @@ export async function GET(req) {
   values.push(pageSize, offset);
   const dataSql = `
     select r.id, r.participation_id, r.player_name, r.opponent_name, r.pack, r.opponent_pack, r.game_version, r.match_type, r.mode,
-           r.max_player_count, r.active_player_count, r.created_at, r.tags, lt.outcome as last_outcome
+           r.max_player_count, r.active_player_count, r.created_at, r.tags, lt.outcome as last_outcome,
+           (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank')::int as player_rank,
+           (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank')::int as opponent_rank
     ${fromSql}
     left join lateral (
       select t.outcome
