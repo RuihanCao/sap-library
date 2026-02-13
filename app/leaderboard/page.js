@@ -143,6 +143,10 @@ function fixed(value, digits = 2) {
   return Number(value || 0).toFixed(digits);
 }
 
+function defaultOrderForSort(sortKey) {
+  return sortKey === "player_name" ? "asc" : "desc";
+}
+
 function IconMultiSelect({ label, options, selected, onChange, placeholder }) {
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
@@ -393,6 +397,21 @@ export default function LeaderboardPage() {
     window.history.replaceState({}, "", `?${nextParams.toString()}`);
   }
 
+  function toggleSort(sortKey) {
+    const nextOrder =
+      filters.sort === sortKey
+        ? (filters.order === "asc" ? "desc" : "asc")
+        : defaultOrderForSort(sortKey);
+    const nextFilters = { ...filters, sort: sortKey, order: nextOrder };
+    setFilters(nextFilters);
+    loadLeaderboard(nextFilters, 1, selectedPlayerId);
+  }
+
+  function sortIndicator(sortKey) {
+    if (filters.sort !== sortKey) return "";
+    return filters.order === "asc" ? "↑" : "↓";
+  }
+
   function closeDetailModal() {
     setDetailModalOpen(false);
     setSelectedPlayerId("");
@@ -581,15 +600,33 @@ export default function LeaderboardPage() {
 
         <div className={`leaderboard-table ${filters.scope === "battle" ? "scope-battle" : "scope-game"}`}>
           <div className="leaderboard-row leaderboard-head">
-            <span>Player</span>
-            <span>Games</span>
-            <span>Rounds</span>
-            <span>Wins</span>
-            <span>Losses</span>
-            <span className="col-draw">Draws</span>
-            <span>Winrate</span>
-            <span>Avg Rolls</span>
-            <span>Avg Gold</span>
+            <button type="button" className={`leaderboard-sort-btn ${filters.sort === "player_name" ? "active" : ""}`} onClick={() => toggleSort("player_name")}>
+              Player <span>{sortIndicator("player_name")}</span>
+            </button>
+            <button type="button" className={`leaderboard-sort-btn ${filters.sort === "games" ? "active" : ""}`} onClick={() => toggleSort("games")}>
+              Games <span>{sortIndicator("games")}</span>
+            </button>
+            <button type="button" className={`leaderboard-sort-btn ${filters.sort === "rounds" ? "active" : ""}`} onClick={() => toggleSort("rounds")}>
+              Rounds <span>{sortIndicator("rounds")}</span>
+            </button>
+            <button type="button" className={`leaderboard-sort-btn ${filters.sort === "wins" ? "active" : ""}`} onClick={() => toggleSort("wins")}>
+              Wins <span>{sortIndicator("wins")}</span>
+            </button>
+            <button type="button" className={`leaderboard-sort-btn ${filters.sort === "losses" ? "active" : ""}`} onClick={() => toggleSort("losses")}>
+              Losses <span>{sortIndicator("losses")}</span>
+            </button>
+            <button type="button" className={`leaderboard-sort-btn col-draw ${filters.sort === "draws" ? "active" : ""}`} onClick={() => toggleSort("draws")}>
+              Draws <span>{sortIndicator("draws")}</span>
+            </button>
+            <button type="button" className={`leaderboard-sort-btn ${filters.sort === "winrate" ? "active" : ""}`} onClick={() => toggleSort("winrate")}>
+              Winrate <span>{sortIndicator("winrate")}</span>
+            </button>
+            <button type="button" className={`leaderboard-sort-btn ${filters.sort === "avg_rolls" ? "active" : ""}`} onClick={() => toggleSort("avg_rolls")}>
+              Avg Rolls <span>{sortIndicator("avg_rolls")}</span>
+            </button>
+            <button type="button" className={`leaderboard-sort-btn ${filters.sort === "avg_gold" ? "active" : ""}`} onClick={() => toggleSort("avg_gold")}>
+              Avg Gold <span>{sortIndicator("avg_gold")}</span>
+            </button>
           </div>
           {players.map((player) => (
             <button
