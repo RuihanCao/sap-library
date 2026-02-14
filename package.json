@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "backfill:game-version": "node scripts/backfill-game-version.js"
   },
   "author": "",
   "license": "ISC",
