@@ -229,6 +229,9 @@ export default function ProfilePage() {
   });
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
   const [query, setQuery] = useState("");
+  const [suggestions, setSuggestions] = useState([]);
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const [selectedPlayerId, setSelectedPlayerId] = useState("");
   const [detail, setDetail] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -242,6 +245,7 @@ export default function ProfilePage() {
   const [modalData, setModalData] = useState(null);
   const [status, setStatus] = useState("");
   const gamesSentinelRef = useRef(null);
+  const suggestionAbortRef = useRef(null);
   const gamesLoadingRef = useRef(false);
   const inFlightGamePagesRef = useRef(new Set());
   const replayImageVersion = "2026-02-12-text-fix";
@@ -283,6 +287,27 @@ export default function ProfilePage() {
   useEffect(() => {
     gamesLoadingRef.current = gamesLoading;
   }, [gamesLoading]);
+
+  useEffect(() => {
+    const term = query.trim();
+    if (!term) {
+      setSuggestions([]);
+      setSuggestionsOpen(false);
+      return;
+    }
+    const timer = setTimeout(() => {
+      fetchProfileSuggestions(term, { forceOpen: true });
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [query, filters.version]);
+
+  useEffect(() => {
+    return () => {
+      if (suggestionAbortRef.current) {
+        suggestionAbortRef.current.abort();
+      }
+    };
+  }, []);
 
   function buildParams(nextFilters = filters, playerIdValue = selectedPlayerId) {
     const params = new URLSearchParams();
@@ -401,6 +426,10 @@ export default function ProfilePage() {
       const res = await fetch(`/api/leaderboard/${encodeURIComponent(playerIdValue)}?${params.toString()}`);
       const data = await res.json();
       setDetail(data);
+      if (data?.playerName) {
+        setQuery(data.playerName);
+        localStorage.setItem(PROFILE_NAME_KEY, data.playerName);
+      }
       if (!options.skipUrlSync) {
         const nextParams = buildParams(nextFilters, playerIdValue);
         nextParams.set("uiView", gamesViewMode);
@@ -443,50 +472,110 @@ export default function ProfilePage() {
     setGamesViewMode(normalized);
   }
 
-  async function resolvePlayer(queryValue, scopeValue = filters.scope, versionValue = filters.version) {
+  async function fetchProfileSuggestions(queryValue, options = {}) {
     const term = (queryValue || "").trim();
-    if (!term) return null;
-    const params = new URLSearchParams();
-    params.set("search", term);
-    params.set("scope", scopeValue || "game");
-    if (versionValue) params.set("version", versionValue);
-    params.set("page", "1");
-    params.set("pageSize", "25");
-    params.set("sort", "games");
-    params.set("order", "desc");
-    const res = await fetch(`/api/leaderboard?${params.toString()}`);
-    const data = await res.json();
-    const players = Array.isArray(data.players) ? data.players : [];
-    if (!players.length) return null;
+    if (!term) {
+      setSuggestions([]);
+      setSuggestionsOpen(false);
+      return [];
+    }
 
-    const lower = term.toLowerCase();
-    return (
-      players.find((p) => (p.playerId || "").toLowerCase() === lower) ||
-      players.find((p) => (p.playerName || "").toLowerCase() === lower) ||
-      players[0]
-    );
+    if (suggestionAbortRef.current) {
+      suggestionAbortRef.current.abort();
+    }
+
+    const controller = new AbortController();
+    suggestionAbortRef.current = controller;
+    setSuggestionsLoading(true);
+    try {
+      const params = new URLSearchParams();
+      params.set("q", term);
+      params.set("limit", "12");
+      if (filters.version) params.set("version", filters.version);
+      const res = await fetch(`/api/profile/players?${params.toString()}`, {
+        signal: controller.signal
+      });
+      const data = await res.json().catch(() => ({}));
+      const players = Array.isArray(data.players) ? data.players : [];
+      setSuggestions(players);
+      setSuggestionsOpen(Boolean(options.forceOpen ?? true) && players.length > 0);
+      return players;
+    } catch {
+      setSuggestions([]);
+      setSuggestionsOpen(false);
+      return [];
+    } finally {
+      if (suggestionAbortRef.current === controller) {
+        suggestionAbortRef.current = null;
+      }
+      setSuggestionsLoading(false);
+    }
+  }
+
+  async function chooseSuggestion(player, options = {}) {
+    if (!player?.playerId) return;
+    setSelectedPlayerId(player.playerId);
+    const nextName = player.latestName || player.playerId;
+    setQuery(nextName);
+    setSuggestionsOpen(false);
+    setSuggestions([]);
+    localStorage.setItem(PROFILE_ID_KEY, player.playerId);
+    localStorage.setItem(PROFILE_NAME_KEY, nextName);
+    if (options.statusText) {
+      setStatus(options.statusText);
+      setTimeout(() => setStatus(""), 1500);
+    }
+    await loadDetail(player.playerId, filters);
   }
 
   async function saveProfile() {
-    const resolved = await resolvePlayer(query);
-    if (!resolved?.playerId) {
+    const term = (query || "").trim();
+    if (!term) {
+      setStatus("Enter a player name or ID.");
+      setTimeout(() => setStatus(""), 1500);
+      return;
+    }
+
+    const currentSuggestions = suggestions.length ? suggestions : await fetchProfileSuggestions(term, { forceOpen: false });
+    if (!currentSuggestions.length) {
       setStatus("No player found.");
       setTimeout(() => setStatus(""), 1500);
       return;
     }
-    setSelectedPlayerId(resolved.playerId);
-    setQuery(resolved.playerName || resolved.playerId);
-    localStorage.setItem(PROFILE_ID_KEY, resolved.playerId);
-    localStorage.setItem(PROFILE_NAME_KEY, resolved.playerName || resolved.playerId);
-    setStatus("Profile saved.");
+
+    const lower = term.toLowerCase();
+    const exactId = currentSuggestions.find((player) => (player.playerId || "").toLowerCase() === lower);
+    if (exactId) {
+      await chooseSuggestion(exactId, { statusText: "Profile saved." });
+      return;
+    }
+
+    const exactNameMatches = currentSuggestions.filter(
+      (player) => (player.latestName || "").toLowerCase() === lower
+    );
+
+    if (exactNameMatches.length === 1) {
+      await chooseSuggestion(exactNameMatches[0], { statusText: "Profile saved." });
+      return;
+    }
+
+    if (currentSuggestions.length === 1) {
+      await chooseSuggestion(currentSuggestions[0], { statusText: "Profile saved." });
+      return;
+    }
+
+    setSuggestions(currentSuggestions);
+    setSuggestionsOpen(true);
+    setStatus("Multiple players found. Select one from suggestions.");
     setTimeout(() => setStatus(""), 1500);
-    await loadDetail(resolved.playerId, filters);
   }
 
   function clearProfile() {
     setQuery("");
     setSelectedPlayerId("");
     setDetail(null);
+    setSuggestions([]);
+    setSuggestionsOpen(false);
     setGames([]);
     setGamesTotal(0);
     setGamesPage(1);
@@ -594,19 +683,56 @@ export default function ProfilePage() {
           </div>
         </div>
         <div className="filters">
-          <div className="field">
+          <div className="field profile-search-field">
             <label>Player Name or ID</label>
             <input
               placeholder="Enter player name or UUID"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
+              onFocus={() => {
+                if (suggestions.length) setSuggestionsOpen(true);
+              }}
+              onBlur={() => setTimeout(() => setSuggestionsOpen(false), 120)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   e.preventDefault();
+                  if (suggestionsOpen && suggestions.length) {
+                    chooseSuggestion(suggestions[0], { statusText: "Profile saved." });
+                    return;
+                  }
                   saveProfile();
                 }
               }}
             />
+            {suggestionsOpen && (query || "").trim() && (
+              <div className="profile-suggest-list">
+                {suggestionsLoading && <div className="profile-suggest-empty">Searching...</div>}
+                {!suggestionsLoading && suggestions.length === 0 && (
+                  <div className="profile-suggest-empty">No matches</div>
+                )}
+                {!suggestionsLoading && suggestions.map((player) => {
+                  const latest = player.latestName || player.playerId;
+                  const alias = (player.matchedNames || []).find(
+                    (name) => (name || "").toLowerCase() !== (latest || "").toLowerCase()
+                  );
+                  return (
+                    <button
+                      key={player.playerId}
+                      type="button"
+                      className="profile-suggest-option"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => chooseSuggestion(player, { statusText: "Profile saved." })}
+                    >
+                      <div className="profile-suggest-main">{latest}</div>
+                      <div className="profile-suggest-sub">
+                        {player.playerId}
+                        {alias ? ` • aka ${alias}` : ""}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
           <div className="field">
             <label>Resolved Player ID</label>

@@ -278,12 +278,14 @@ function getGameTypeIcon(matchType) {
 const DEFAULT_FILTERS = {
   player: "",
   playerId: "",
+  pid: "",
   opponent: "",
   version: "current",
   minRank: "",
   minRankMode: "any",
   packA: "",
   packB: "",
+  winningPack: "",
   excludeA: "",
   excludeB: "",
   mirrorMatch: false,
@@ -308,6 +310,8 @@ const DEFAULT_FILTERS = {
   endDate: "",
   tags: "",
   turn: "",
+  minTurn: "",
+  maxTurn: "",
   sort: "created_at",
   order: "desc",
   pageSize: "10"
@@ -429,6 +433,7 @@ export default function Page() {
     if (enabledValue.player) {
       if (filtersValue.player) params.set("player", filtersValue.player);
       if (filtersValue.playerId) params.set("playerId", filtersValue.playerId);
+      if (filtersValue.pid) params.set("pid", filtersValue.pid);
       if (filtersValue.opponent) params.set("opponent", filtersValue.opponent);
       if (filtersValue.minRank) {
         params.set("minRank", filtersValue.minRank);
@@ -438,6 +443,7 @@ export default function Page() {
     if (enabledValue.matchup) {
       if (filtersValue.packA) params.set("packA", filtersValue.packA);
       if (filtersValue.packB) params.set("packB", filtersValue.packB);
+      if (filtersValue.winningPack) params.set("winningPack", filtersValue.winningPack);
       if (filtersValue.mirrorMatch) params.set("mirrorMatch", "true");
     }
     if (enabledValue.pets) {
@@ -452,7 +458,11 @@ export default function Page() {
       if (selectedToysValue.length) params.set("toy", selectedToysValue.join(","));
       params.set("toyMode", filtersValue.toyMode);
     }
-    if (enabledValue.turn && filtersValue.turn) params.set("turn", filtersValue.turn);
+    if (enabledValue.turn) {
+      if (filtersValue.turn) params.set("turn", filtersValue.turn);
+      if (filtersValue.minTurn) params.set("minTurn", filtersValue.minTurn);
+      if (filtersValue.maxTurn) params.set("maxTurn", filtersValue.maxTurn);
+    }
     if (enabledValue.matchType && filtersValue.matchType && filtersValue.matchType !== "any") {
       params.set("matchType", filtersValue.matchType);
     }
@@ -520,11 +530,13 @@ export default function Page() {
 
     assignText("player");
     assignText("playerId");
+    assignText("pid");
     assignText("opponent");
     assignText("minRank");
     assignText("minRankMode");
     assignText("packA");
     assignText("packB");
+    assignText("winningPack");
     assignText("excludeA");
     assignText("excludeB");
     assignText("petMode");
@@ -549,6 +561,8 @@ export default function Page() {
     assignText("endDate");
     assignText("tags");
     assignText("turn");
+    assignText("minTurn");
+    assignText("maxTurn");
     assignText("sort");
     assignText("order");
     assignText("pageSize");
@@ -565,12 +579,12 @@ export default function Page() {
         if (key in nextEnabled) nextEnabled[key] = true;
       }
     } else {
-      nextEnabled.player = Boolean(nextFilters.player || nextFilters.playerId || nextFilters.opponent || nextFilters.minRank);
-      nextEnabled.matchup = Boolean(nextFilters.packA || nextFilters.packB || nextFilters.mirrorMatch);
+      nextEnabled.player = Boolean(nextFilters.player || nextFilters.playerId || nextFilters.pid || nextFilters.opponent || nextFilters.minRank);
+      nextEnabled.matchup = Boolean(nextFilters.packA || nextFilters.packB || nextFilters.winningPack || nextFilters.mirrorMatch);
       nextEnabled.pets = Boolean(nextSelectedPets.length);
       nextEnabled.perks = Boolean(nextSelectedPerks.length);
       nextEnabled.toys = Boolean(nextSelectedToys.length);
-      nextEnabled.turn = Boolean(nextFilters.turn);
+      nextEnabled.turn = Boolean(nextFilters.turn || nextFilters.minTurn || nextFilters.maxTurn);
       nextEnabled.matchType = Boolean(nextFilters.matchType && nextFilters.matchType !== "any");
     }
     if (nextFilters.mirrorMatch) {
@@ -627,12 +641,12 @@ export default function Page() {
     setEnabled((prev) => {
       const next = { ...prev, [key]: !prev[key] };
         if (!next[key]) {
-        if (key === "player") setFilters((f) => ({ ...f, player: "", playerId: "", opponent: "", minRank: "", minRankMode: "any" }));
-        if (key === "matchup") setFilters((f) => ({ ...f, packA: "", packB: "", mirrorMatch: false }));
+        if (key === "player") setFilters((f) => ({ ...f, player: "", playerId: "", pid: "", opponent: "", minRank: "", minRankMode: "any" }));
+        if (key === "matchup") setFilters((f) => ({ ...f, packA: "", packB: "", winningPack: "", mirrorMatch: false }));
         if (key === "pets") setSelectedPets([]);
         if (key === "perks") setSelectedPerks([]);
         if (key === "toys") setSelectedToys([]);
-        if (key === "turn") setFilters((f) => ({ ...f, turn: "" }));
+        if (key === "turn") setFilters((f) => ({ ...f, turn: "", minTurn: "", maxTurn: "" }));
         if (key === "matchType") setFilters((f) => ({ ...f, matchType: "any" }));
       }
       return next;
@@ -717,7 +731,7 @@ export default function Page() {
     }
 
     setIngestStatus(
-      `Uploaded ${inserted}, skipped by PID ${skippedParticipation}, skipped by Game ID ${skippedMatch}, failed ${failed}`
+      `Uploaded ${inserted}, already uploaded ${skippedParticipation}, uploaded from other perspective ${skippedMatch}, failed ${failed}`
     );
     setIngestSummary({
       inserted,
@@ -848,13 +862,16 @@ export default function Page() {
     }
   }
 
-  async function copyReplayJsonCode() {
-    const participationId = modalData?.replay?.participation_id;
-    if (!participationId) return;
+  async function copyReplayCode(participationId, sideLabel = "Replay") {
+    if (!participationId) {
+      setModalShareStatus(`${sideLabel} code unavailable.`);
+      setTimeout(() => setModalShareStatus(""), 1400);
+      return;
+    }
     try {
       const payload = JSON.stringify({ T: 1, Pid: participationId });
       await navigator.clipboard.writeText(payload);
-      setModalShareStatus("Replay code copied.");
+      setModalShareStatus(`${sideLabel} code copied.`);
       setTimeout(() => setModalShareStatus(""), 1400);
     } catch {
       setModalShareStatus("Could not copy replay code.");
@@ -1044,8 +1061,8 @@ export default function Page() {
           ingestSummary.failed > 0) && (
           <div className="ingest-summary">
             <div><strong>Inserted:</strong> {ingestSummary.inserted}</div>
-            <div><strong>Skipped (PID):</strong> {ingestSummary.skippedParticipation}</div>
-            <div><strong>Skipped (Game ID):</strong> {ingestSummary.skippedMatch}</div>
+            <div><strong>Skipped:</strong> This replay has already been uploaded ({ingestSummary.skippedParticipation})</div>
+            <div><strong>Skipped:</strong> Uploaded from other perspective ({ingestSummary.skippedMatch})</div>
             <div><strong>Failed:</strong> {ingestSummary.failed}</div>
           </div>
         )}
@@ -1134,6 +1151,14 @@ export default function Page() {
                   />
                 </div>
                 <div className="field">
+                  <label>Replay Code / PID</label>
+                  <input
+                    placeholder="PID, replay JSON, or URL"
+                    value={filters.pid}
+                    onChange={(e) => setFilters({ ...filters, pid: e.target.value })}
+                  />
+                </div>
+                <div className="field">
                   <label>Player 2</label>
                   <input
                     placeholder="Second player name"
@@ -1199,6 +1224,20 @@ export default function Page() {
                   >
                     <option value="no">No</option>
                     <option value="yes">Yes</option>
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Winning Pack</label>
+                  <select
+                    value={filters.winningPack}
+                    onChange={(e) => setFilters({ ...filters, winningPack: e.target.value })}
+                  >
+                    <option value="">Any</option>
+                    {meta.packs.map((pack) => (
+                      <option key={`win-${pack.id}`} value={pack.name}>
+                        {pack.name}
+                      </option>
+                    ))}
                   </select>
                 </div>
               </>
@@ -1267,14 +1306,32 @@ export default function Page() {
               </>
             )}
             {enabled.turn && (
-              <div className="field">
-                <label>Turn</label>
-                <input
-                  placeholder="Turn"
-                  value={filters.turn}
-                  onChange={(e) => setFilters({ ...filters, turn: e.target.value })}
-                />
-              </div>
+              <>
+                <div className="field">
+                  <label>Turn</label>
+                  <input
+                    placeholder="Exact turn"
+                    value={filters.turn}
+                    onChange={(e) => setFilters({ ...filters, turn: e.target.value })}
+                  />
+                </div>
+                <div className="field">
+                  <label>Min Turn</label>
+                  <input
+                    placeholder="1"
+                    value={filters.minTurn}
+                    onChange={(e) => setFilters({ ...filters, minTurn: e.target.value })}
+                  />
+                </div>
+                <div className="field">
+                  <label>Max Turn</label>
+                  <input
+                    placeholder="15"
+                    value={filters.maxTurn}
+                    onChange={(e) => setFilters({ ...filters, maxTurn: e.target.value })}
+                  />
+                </div>
+              </>
             )}
             {enabled.matchType && (
               <div className="field">
@@ -1287,7 +1344,6 @@ export default function Page() {
                   <option value="ranked">Ranked</option>
                   <option value="arena">Arena</option>
                   <option value="private">Private</option>
-                  <option value="unknown">Unknown</option>
                 </select>
               </div>
             )}
@@ -1637,6 +1693,15 @@ export default function Page() {
                     rightClassName={opponentMatchupClass}
                   />
                 </div>
+                <div className="muted card-meta-line">
+                  <span>Rank {r.player_rank ?? "?"}</span>
+                  <span>vs</span>
+                  <span>{worldOpponent ? "The World" : `Rank ${r.opponent_rank ?? "?"}`}</span>
+                  <span>•</span>
+                  <span>v{r.game_version || "?"}</span>
+                  <span>•</span>
+                  <span>{r.created_at ? new Date(r.created_at).toLocaleDateString() : ""}</span>
+                </div>
                 <div className="replay-image-wrap">
                   <img
                     className="replay-image"
@@ -1664,7 +1729,20 @@ export default function Page() {
               <h3>Replay Details</h3>
               <div className="modal-head-actions">
                 <button className="ghost" type="button" onClick={copyReplayShareLink}>Share</button>
-                <button className="ghost" type="button" onClick={copyReplayJsonCode}>Copy Replay Code</button>
+                <button
+                  className="ghost"
+                  type="button"
+                  onClick={() => copyReplayCode(modalData?.replay?.participation_id, "Player 1")}
+                >
+                  Copy P1 Code
+                </button>
+                <button
+                  className="ghost"
+                  type="button"
+                  onClick={() => copyReplayCode(modalData?.replay?.opponent_participation_id, "Player 2")}
+                >
+                  Copy P2 Code
+                </button>
                 <button className="ghost" type="button" onClick={closeModal}>Close</button>
               </div>
             </div>
@@ -1736,6 +1814,16 @@ export default function Page() {
                       </button>
                     </h4>
                     <div className="stat">
+                      <span className="label">Replay Code</span>
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={() => copyReplayCode(modalData.replay.participation_id, "Player 1")}
+                      >
+                        Copy
+                      </button>
+                    </div>
+                    <div className="stat">
                       <span className="label">Rank</span>
                       <span>{modalData.replay.player_rank ?? "?"}</span>
                     </div>
@@ -1757,6 +1845,16 @@ export default function Page() {
                           {modalData.replay.opponent_name || "Unknown"}
                         </button>
                       </h4>
+                      <div className="stat">
+                        <span className="label">Replay Code</span>
+                        <button
+                          type="button"
+                          className="ghost"
+                          onClick={() => copyReplayCode(modalData.replay.opponent_participation_id, "Player 2")}
+                        >
+                          Copy
+                        </button>
+                      </div>
                       <div className="stat">
                         <span className="label">Rank</span>
                         <span>{modalData.replay.opponent_rank ?? "?"}</span>

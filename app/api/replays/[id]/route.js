@@ -70,6 +70,7 @@ export async function GET(_req, context) {
 
     let playerId = null;
     let opponentId = null;
+    let opponentParticipationId = null;
     let playerRank = null;
     let opponentRank = null;
     try {
@@ -78,6 +79,7 @@ export async function GET(_req, context) {
       try {
         const modeModel = raw?.GenesisModeModel ? JSON.parse(raw.GenesisModeModel) : null;
         opponentId = modeModel?.Opponents?.[0]?.UserId || null;
+        opponentParticipationId = modeModel?.Opponents?.[0]?.ParticipationId || null;
         const parsedPlayerRank = modeModel?.Rank;
         const parsedOpponentRank = modeModel?.Opponents?.[0]?.Rank;
         playerRank = Number.isFinite(parsedPlayerRank) ? parsedPlayerRank : null;
@@ -119,6 +121,7 @@ export async function GET(_req, context) {
         ...replayRes.rows[0],
         player_id: playerId,
         opponent_id: opponentId,
+        opponent_participation_id: opponentParticipationId,
         player_rank: playerRank,
         opponent_rank: opponentRank,
         raw_json: undefined

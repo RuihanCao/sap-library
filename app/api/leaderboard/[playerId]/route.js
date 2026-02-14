@@ -377,12 +377,33 @@ export async function GET(req, context) {
   const sql = scope === "battle" ? buildBattleSql() : buildGameSql();
   const { rows } = await pool.query(sql, values);
   const row = rows[0] || {};
+  const latestNameResult = await pool.query(
+    `
+      with source_rows as (
+        select nullif(r.raw_json->>'UserId', '') as player_id, nullif(r.player_name, '') as player_name, r.created_at
+        from replays r
+        where r.match_type != 'arena'
+        union all
+        select nullif((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'UserId'), '') as player_id, nullif(r.opponent_name, '') as player_name, r.created_at
+        from replays r
+        where r.match_type != 'arena'
+      )
+      select sr.player_name
+      from source_rows sr
+      where sr.player_id = $1
+        and sr.player_name is not null
+      order by sr.created_at desc
+      limit 1
+    `,
+    [playerId]
+  );
+  const latestName = latestNameResult.rows[0]?.player_name || null;
 
   return NextResponse.json(
     {
       scope,
       playerId,
-      playerName: row.player_name || null,
+      playerName: latestName || row.player_name || null,
       summary: row.summary || {},
       packStats: row.pack_stats || [],
       matchupStats: row.matchup_stats || [],

@@ -13,11 +13,70 @@ function parseList(value) {
     .filter(Boolean);
 }
 
+function extractParticipationId(input) {
+  if (input === null || input === undefined) return null;
+  const text = String(input).trim();
+  if (!text) return null;
+
+  const uuidRegex = /[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i;
+
+  if (text.startsWith("{") && text.endsWith("}")) {
+    try {
+      const parsed = JSON.parse(text);
+      const fromJson =
+        parsed?.Pid ||
+        parsed?.pid ||
+        parsed?.ParticipationId ||
+        parsed?.participationId;
+      if (fromJson && uuidRegex.test(String(fromJson))) {
+        return String(fromJson).match(uuidRegex)[0];
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  if (/^https?:\/\//i.test(text)) {
+    try {
+      const url = new URL(text);
+      const candidates = [
+        url.searchParams.get("Pid"),
+        url.searchParams.get("pid"),
+        url.searchParams.get("ParticipationId"),
+        url.searchParams.get("participationId"),
+        url.searchParams.get("participation_id")
+      ].filter(Boolean);
+
+      for (const candidate of candidates) {
+        const match = String(candidate).match(uuidRegex);
+        if (match) return match[0];
+      }
+
+      const hashMatch = decodeURIComponent(url.hash || "").match(uuidRegex);
+      if (hashMatch) return hashMatch[0];
+    } catch {
+      // ignore
+    }
+  }
+
+  const keyedMatch = text.match(
+    /(?:^|[?&#])(?:pid|Pid|participationId|ParticipationId|participation_id)=([0-9a-f-]{36})/i
+  );
+  if (keyedMatch) return keyedMatch[1];
+
+  const plainMatch = text.match(uuidRegex);
+  if (plainMatch) return plainMatch[0];
+
+  return null;
+}
+
 export async function GET(req) {
   const { searchParams } = new URL(req.url);
   const player = searchParams.get("player");
   const playerId = searchParams.get("playerId");
+  const pid = extractParticipationId(searchParams.get("pid"));
   const opponent = searchParams.get("opponent");
+  const winningPack = searchParams.get("winningPack");
   const minRankRaw = searchParams.get("minRank");
   const minRank = minRankRaw !== null && minRankRaw !== "" && Number.isFinite(Number(minRankRaw))
     ? Number(minRankRaw)
@@ -76,6 +135,10 @@ export async function GET(req) {
   const turnRaw = searchParams.get("turn");
   const turnValue = turnRaw === null ? "" : String(turnRaw).trim();
   const turn = turnValue === "" ? null : Number.isFinite(Number(turnValue)) ? Number(turnValue) : null;
+  const minTurnRaw = searchParams.get("minTurn");
+  const maxTurnRaw = searchParams.get("maxTurn");
+  const minTurn = minTurnRaw === null || minTurnRaw === "" ? null : Number.isFinite(Number(minTurnRaw)) ? Number(minTurnRaw) : null;
+  const maxTurn = maxTurnRaw === null || maxTurnRaw === "" ? null : Number.isFinite(Number(maxTurnRaw)) ? Number(maxTurnRaw) : null;
 
   const pageRaw = searchParams.get("page");
   const pageSizeRaw = searchParams.get("pageSize");
@@ -105,6 +168,11 @@ export async function GET(req) {
     const exactIdx = values.length - 1;
     const likeIdx = values.length;
     clauses.push(`((r.raw_json->>'UserId') = $${exactIdx} or coalesce(r.raw_json->>'GenesisModeModel', '') ilike $${likeIdx})`);
+  }
+
+  if (pid) {
+    values.push(pid);
+    clauses.push(`r.participation_id = $${values.length}`);
   }
 
   if (opponent) {
@@ -166,6 +234,17 @@ export async function GET(req) {
     clauses.push(`r.game_version = any($${values.length})`);
   }
 
+  if (winningPack) {
+    values.push(winningPack);
+    clauses.push(`(
+      case
+        when (select t.outcome from turns t where t.replay_id = r.id order by t.turn_number desc limit 1) = 1 then r.pack
+        when (select t.outcome from turns t where t.replay_id = r.id order by t.turn_number desc limit 1) = 2 then r.opponent_pack
+        else null
+      end
+    ) = $${values.length}`);
+  }
+
   if (startDate) {
     values.push(startDate);
     clauses.push(`r.created_at >= $${values.length}`);
@@ -176,17 +255,31 @@ export async function GET(req) {
     clauses.push(`r.created_at <= $${values.length}`);
   }
 
+  const buildTurnClause = (alias = "p") => {
+    let clause = "";
+    if (turn !== null) {
+      values.push(turn);
+      clause += ` and ${alias}.turn_number = $${values.length}`;
+      return clause;
+    }
+    if (minTurn !== null) {
+      values.push(minTurn);
+      clause += ` and ${alias}.turn_number >= $${values.length}`;
+    }
+    if (maxTurn !== null) {
+      values.push(maxTurn);
+      clause += ` and ${alias}.turn_number <= $${values.length}`;
+    }
+    return clause;
+  };
+
   const addPetClause = () => {
     if (!petList.length) return false;
 
     if (petMode === "all") {
       values.push(petList);
       const listIndex = values.length;
-      let turnClause = "";
-      if (turn !== null) {
-        values.push(turn);
-        turnClause = ` and p.turn_number = $${values.length}`;
-      }
+      const turnClause = buildTurnClause("p");
       values.push(petList.length);
       const countIndex = values.length;
       clauses.push(
@@ -197,11 +290,7 @@ export async function GET(req) {
 
     values.push(petList);
     const listIndex = values.length;
-    let turnClause = "";
-    if (turn !== null) {
-      values.push(turn);
-      turnClause = ` and p.turn_number = $${values.length}`;
-    }
+    const turnClause = buildTurnClause("p");
     clauses.push(
       `exists (select 1 from pets p where p.replay_id = r.id and p.pet_name = any($${listIndex})${turnClause})`
     );
@@ -214,11 +303,7 @@ export async function GET(req) {
     if (perkMode === "all") {
       values.push(perkList);
       const listIndex = values.length;
-      let turnClause = "";
-      if (turn !== null) {
-        values.push(turn);
-        turnClause = ` and p.turn_number = $${values.length}`;
-      }
+      const turnClause = buildTurnClause("p");
       values.push(perkList.length);
       const countIndex = values.length;
       clauses.push(
@@ -229,11 +314,7 @@ export async function GET(req) {
 
     values.push(perkList);
     const listIndex = values.length;
-    let turnClause = "";
-    if (turn !== null) {
-      values.push(turn);
-      turnClause = ` and p.turn_number = $${values.length}`;
-    }
+    const turnClause = buildTurnClause("p");
     clauses.push(
       `exists (select 1 from pets p where p.replay_id = r.id and p.perk = any($${listIndex})${turnClause})`
     );
@@ -246,11 +327,7 @@ export async function GET(req) {
     if (toyMode === "all") {
       values.push(toyList);
       const listIndex = values.length;
-      let turnClause = "";
-      if (turn !== null) {
-        values.push(turn);
-        turnClause = ` and p.turn_number = $${values.length}`;
-      }
+      const turnClause = buildTurnClause("p");
       values.push(toyList.length);
       const countIndex = values.length;
       clauses.push(
@@ -261,11 +338,7 @@ export async function GET(req) {
 
     values.push(toyList);
     const listIndex = values.length;
-    let turnClause = "";
-    if (turn !== null) {
-      values.push(turn);
-      turnClause = ` and p.turn_number = $${values.length}`;
-    }
+    const turnClause = buildTurnClause("p");
     clauses.push(
       `exists (select 1 from pets p where p.replay_id = r.id and p.toy = any($${listIndex})${turnClause})`
     );
@@ -376,11 +449,21 @@ export async function GET(req) {
   addEconomyClause("player_rolls", "opponent_rolls", rollsMinRaw, rollsMaxRaw);
   addEconomyClause("player_summons", "opponent_summons", summonsMinRaw, summonsMaxRaw);
 
-  if (turn !== null && !petUsedTurn && !perkUsedTurn && !toyUsedTurn) {
-    values.push(turn);
-    clauses.push(
-      `exists (select 1 from turns t where t.replay_id = r.id and t.turn_number = $${values.length})`
-    );
+  if ((turn !== null || minTurn !== null || maxTurn !== null) && !petUsedTurn && !perkUsedTurn && !toyUsedTurn) {
+    let turnClause = "";
+    if (turn !== null) {
+      values.push(turn);
+      turnClause += ` and t.turn_number = $${values.length}`;
+    }
+    if (minTurn !== null) {
+      values.push(minTurn);
+      turnClause += ` and t.turn_number >= $${values.length}`;
+    }
+    if (maxTurn !== null) {
+      values.push(maxTurn);
+      turnClause += ` and t.turn_number <= $${values.length}`;
+    }
+    clauses.push(`exists (select 1 from turns t where t.replay_id = r.id${turnClause})`);
   }
 
   const fromSql = `from replays r`;

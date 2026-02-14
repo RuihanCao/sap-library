@@ -149,6 +149,12 @@ const THEMES = {
 
 const EXCLUDED_PACKS = ["Custom", "Weekly"];
 const defaultSortForScope = (scope) => (scope === "battle" ? "winrate" : "pickrate");
+const FILTER_FALLBACK_SPRITES = {
+  pet: "/Sprite/Pets/Turtle.png",
+  perk: "/Sprite/Food/Honey.png",
+  toy: "/Sprite/Toys/RelicFoamSword.png",
+  turn: "/hourglass-twemoji.png"
+};
 
 function parseCsvList(value) {
   if (!value) return [];
@@ -162,6 +168,11 @@ function normalizeSortMetric(value) {
   return value === "presence" ? "pickrate" : value;
 }
 
+function pickFilterSprite(list, fallbackSprite) {
+  const sprite = Array.isArray(list) ? list.find((item) => item?.sprite)?.sprite : "";
+  return sprite || fallbackSprite;
+}
+
 const DEFAULT_STATS_FILTERS = {
   scope: "game",
   player: "",
@@ -169,6 +180,8 @@ const DEFAULT_STATS_FILTERS = {
   version: "current",
   pack: "",
   opponentPack: "",
+  excludeMirrors: false,
+  itemPack: "",
   minTurn: "",
   maxTurn: "",
   pet: [],
@@ -208,8 +221,9 @@ function pickTheme(name) {
 }
 
 function formatPct(value) {
-  if (!Number.isFinite(value) || value <= 0) return "0%";
-  return `${(value * 100).toFixed(1)}%`;
+  if (!Number.isFinite(value)) return "0.00%";
+  const clamped = Math.max(0, Math.min(1, value));
+  return `${(clamped * 100).toFixed(2)}%`;
 }
 
 function IconSelect({ label, options, value, onChange, placeholder }) {
@@ -375,6 +389,12 @@ export default function StatsPage() {
     perk: false,
     toy: false
   });
+  const [collapsed, setCollapsed] = useState({
+    pack: false,
+    pet: false,
+    perk: false,
+    toy: false
+  });
   const [shareStatus, setShareStatus] = useState("");
 
   useEffect(() => {
@@ -415,6 +435,10 @@ export default function StatsPage() {
   const petOptions = useMemo(() => meta.pets, [meta.pets]);
   const perkOptions = useMemo(() => meta.perks, [meta.perks]);
   const toyOptions = useMemo(() => meta.toys, [meta.toys]);
+  const petFilterSprite = pickFilterSprite(meta.pets, FILTER_FALLBACK_SPRITES.pet);
+  const perkFilterSprite = pickFilterSprite(meta.perks, FILTER_FALLBACK_SPRITES.perk);
+  const toyFilterSprite = pickFilterSprite(meta.toys, FILTER_FALLBACK_SPRITES.toy);
+  const turnFilterSprite = FILTER_FALLBACK_SPRITES.turn;
 
   function buildStatsParams(
     nextFilters = filters,
@@ -435,6 +459,8 @@ export default function StatsPage() {
     if (nextFilters.version) params.set("version", nextFilters.version);
     if (nextFilters.pack) params.set("pack", nextFilters.pack);
     if (nextFilters.opponentPack) params.set("opponentPack", nextFilters.opponentPack);
+    if (nextFilters.excludeMirrors) params.set("excludeMirrors", "true");
+    if (nextFilters.itemPack) params.set("itemPack", nextFilters.itemPack);
     if (nextFilters.minTurn) params.set("minTurn", nextFilters.minTurn);
     if (nextFilters.maxTurn) params.set("maxTurn", nextFilters.maxTurn);
     if (nextFilters.pet?.length) params.set("pet", nextFilters.pet.join(","));
@@ -506,6 +532,8 @@ export default function StatsPage() {
       version: urlParams.get("version") || "current",
       pack: urlParams.get("pack") || "",
       opponentPack: urlParams.get("opponentPack") || "",
+      excludeMirrors: urlParams.get("excludeMirrors") === "true",
+      itemPack: urlParams.get("itemPack") || "",
       minTurn: urlParams.get("minTurn") || "",
       maxTurn: urlParams.get("maxTurn") || "",
       pet: parseCsvList(urlParams.get("pet")),
@@ -562,6 +590,10 @@ export default function StatsPage() {
     }
   }
 
+  function toggleCollapsed(sectionKey) {
+    setCollapsed((prev) => ({ ...prev, [sectionKey]: !prev[sectionKey] }));
+  }
+
   const petSprite = (name) => petOptions.find((pet) => pet.name === name)?.sprite;
   const perkSprite = (name) => perkOptions.find((perk) => perk.name === name)?.sprite;
   const toySprite = (name) => toyOptions.find((toy) => toy.name === name)?.sprite;
@@ -570,15 +602,23 @@ export default function StatsPage() {
     Turtle: 0,
     Puppy: 1,
     Star: 2,
-    Custom: 3,
-    Weekly: 4,
-    Golden: 5,
-    Unicorn: 6,
-    Danger: 7
+    Golden: 3,
+    Unicorn: 4,
+    Danger: 5,
+    Custom: 6,
+    Weekly: 7,
+    Unassigned: 99
   };
+  const petMetaMap = useMemo(() => new Map((petOptions || []).map((entry) => [entry.name, entry])), [petOptions]);
+  const perkMetaMap = useMemo(() => new Map((perkOptions || []).map((entry) => [entry.name, entry])), [perkOptions]);
+  const toyMetaMap = useMemo(() => new Map((toyOptions || []).map((entry) => [entry.name, entry])), [toyOptions]);
+  const itemPackFilter = filters.itemPack || "";
+  const appearanceLabel = filters.scope === "battle" ? "Round Share" : "Appearance Rate";
   const itemSortOptions = filters.scope === "battle"
     ? [
         { value: "name", label: "Name" },
+        { value: "pack", label: "Pack Group" },
+        { value: "tier", label: "Tier" },
         { value: "count", label: "Rounds" },
         { value: "winrate", label: "Winrate" },
         { value: "lossrate", label: "Lossrate" },
@@ -586,8 +626,10 @@ export default function StatsPage() {
       ]
     : [
         { value: "name", label: "Name" },
+        { value: "pack", label: "Pack Group" },
+        { value: "tier", label: "Tier" },
         { value: "buyCount", label: "Buy Count" },
-        { value: "pickrate", label: "Pickrate" },
+        { value: "pickrate", label: appearanceLabel },
         { value: "buyWinrate", label: "Winrate (Buy)" },
         { value: "buyLossrate", label: "Lossrate (Buy)" },
         { value: "endCount", label: "End Count" },
@@ -595,20 +637,97 @@ export default function StatsPage() {
         { value: "endWinrate", label: "Winrate (End)" },
         { value: "endLossrate", label: "Lossrate (End)" }
       ];
-  const sortRows = (rows, getValue, order) => {
-    const direction = order === "desc" ? -1 : 1;
-    return [...rows].sort((a, b) => {
-      const av = getValue(a);
-      const bv = getValue(b);
-      if (av == null && bv == null) return 0;
-      if (av == null) return 1;
-      if (bv == null) return -1;
-      if (typeof av === "string" || typeof bv === "string") {
-        return direction * String(av).localeCompare(String(bv));
+  const expandWithMeta = (rows, nameKey, metaMap, sortMetric) => {
+    const duplicateByPack = sortMetric === "pack";
+    const result = [];
+    for (const row of rows) {
+      const name = row[nameKey];
+      const meta = metaMap.get(name) || {};
+      const tier = Number.isFinite(Number(meta?.tier)) ? Number(meta.tier) : null;
+      const rawPacks = Array.isArray(meta?.packs) && meta.packs.length ? meta.packs : ["Unassigned"];
+      const selectedPacks = itemPackFilter ? rawPacks.filter((packName) => packName === itemPackFilter) : rawPacks;
+      if (!selectedPacks.length) continue;
+
+      if (duplicateByPack) {
+        for (const packName of selectedPacks) {
+          result.push({ ...row, _tier: tier, _pack: packName });
+        }
+      } else {
+        result.push({ ...row, _tier: tier, _pack: selectedPacks[0] });
       }
-      return direction * (Number(av) - Number(bv));
-    });
+    }
+    return result;
   };
+
+  const compareRows = (a, b, sortMetric, order, totalGamesValue, nameKey) => {
+    const direction = order === "desc" ? -1 : 1;
+    const games = Number(totalGamesValue || 0);
+
+    const calcMetric = (row) => {
+      const gamesWith = Number(row.games_with || 0);
+      const winsWith = Number(row.wins_with || 0);
+      const drawsWith = Number(row.draws_with || 0);
+      const lossesWith = Math.max(0, gamesWith - winsWith - drawsWith);
+      const gamesEnd = Number(row.games_end || 0);
+      const winsEnd = Number(row.wins_end || 0);
+      const drawsEnd = Number(row.draws_end || 0);
+      const lossesEnd = Math.max(0, gamesEnd - winsEnd - drawsEnd);
+
+      switch (sortMetric) {
+        case "name":
+          return row[nameKey];
+        case "pack":
+          return packOrderMap[row._pack] ?? 999;
+        case "tier":
+          return row._tier ?? 999;
+        case "count":
+          return gamesWith;
+        case "winrate":
+          return gamesWith ? winsWith / gamesWith : 0;
+        case "lossrate":
+          return gamesWith ? lossesWith / gamesWith : 0;
+        case "drawrate":
+          return gamesWith ? drawsWith / gamesWith : 0;
+        case "buyCount":
+          return gamesWith;
+        case "presence":
+        case "pickrate":
+          return games ? gamesWith / games : 0;
+        case "buyWinrate":
+          return gamesWith ? winsWith / gamesWith : 0;
+        case "buyLossrate":
+          return gamesWith ? lossesWith / gamesWith : 0;
+        case "endCount":
+          return gamesEnd;
+        case "endRate":
+          return games ? gamesEnd / games : 0;
+        case "endWinrate":
+          return gamesEnd ? winsEnd / gamesEnd : 0;
+        case "endLossrate":
+          return gamesEnd ? lossesEnd / gamesEnd : 0;
+        default:
+          return row[nameKey];
+      }
+    };
+
+    const av = calcMetric(a);
+    const bv = calcMetric(b);
+
+    let metricCompare = 0;
+    if (typeof av === "string" || typeof bv === "string") {
+      metricCompare = direction * String(av).localeCompare(String(bv));
+    } else {
+      metricCompare = direction * (Number(av) - Number(bv));
+    }
+    if (metricCompare !== 0) return metricCompare;
+
+    if (sortMetric !== "pack") {
+      const packCompare = (packOrderMap[a._pack] ?? 999) - (packOrderMap[b._pack] ?? 999);
+      if (packCompare !== 0) return packCompare;
+    }
+    return String(a[nameKey] || "").localeCompare(String(b[nameKey] || ""));
+  };
+
   const sortedPackStats = useMemo(() => {
     return [...stats.packStats].sort((a, b) => {
       const av = packOrderMap[a.pack] ?? 999;
@@ -618,148 +737,31 @@ export default function StatsPage() {
     });
   }, [stats.packStats]);
   const sortedPetStats = useMemo(() => {
-    return sortRows(stats.petStats, (row) => {
-      const games = Number(stats.totalGames || 0);
-      const gamesWith = Number(row.games_with || 0);
-      const winsWith = Number(row.wins_with || 0);
-      const drawsWith = Number(row.draws_with || 0);
-      const lossesWith = Math.max(0, gamesWith - winsWith - drawsWith);
-      const gamesEnd = Number(row.games_end || 0);
-      const winsEnd = Number(row.wins_end || 0);
-      const drawsEnd = Number(row.draws_end || 0);
-      const lossesEnd = Math.max(0, gamesEnd - winsEnd - drawsEnd);
-      switch (petSort) {
-        case "name":
-          return row.pet_name;
-        case "count":
-          return gamesWith;
-        case "winrate":
-          return gamesWith ? winsWith / gamesWith : 0;
-        case "lossrate":
-          return gamesWith ? lossesWith / gamesWith : 0;
-        case "drawrate":
-          return gamesWith ? drawsWith / gamesWith : 0;
-        case "buyCount":
-          return gamesWith;
-        case "presence":
-        case "pickrate":
-          return games ? gamesWith / games : 0;
-        case "buyWinrate":
-          return gamesWith ? winsWith / gamesWith : 0;
-        case "buyLossrate":
-          return gamesWith ? lossesWith / gamesWith : 0;
-        case "endCount":
-          return gamesEnd;
-        case "endRate":
-          return games ? gamesEnd / games : 0;
-        case "endWinrate":
-          return gamesEnd ? winsEnd / gamesEnd : 0;
-        case "endLossrate":
-          return gamesEnd ? lossesEnd / gamesEnd : 0;
-        default:
-          return row.pet_name;
-      }
-    }, petOrder);
-  }, [stats.petStats, stats.totalGames, petSort, petOrder]);
+    return expandWithMeta(stats.petStats, "pet_name", petMetaMap, petSort).sort((a, b) =>
+      compareRows(a, b, petSort, petOrder, stats.totalGames, "pet_name")
+    );
+  }, [stats.petStats, stats.totalGames, petSort, petOrder, petMetaMap, itemPackFilter]);
   const sortedPerkStats = useMemo(() => {
-    return sortRows(stats.perkStats, (row) => {
-      const games = Number(stats.totalGames || 0);
-      const gamesWith = Number(row.games_with || 0);
-      const winsWith = Number(row.wins_with || 0);
-      const drawsWith = Number(row.draws_with || 0);
-      const lossesWith = Math.max(0, gamesWith - winsWith - drawsWith);
-      const gamesEnd = Number(row.games_end || 0);
-      const winsEnd = Number(row.wins_end || 0);
-      const drawsEnd = Number(row.draws_end || 0);
-      const lossesEnd = Math.max(0, gamesEnd - winsEnd - drawsEnd);
-      switch (perkSort) {
-        case "name":
-          return row.perk_name;
-        case "count":
-          return gamesWith;
-        case "winrate":
-          return gamesWith ? winsWith / gamesWith : 0;
-        case "lossrate":
-          return gamesWith ? lossesWith / gamesWith : 0;
-        case "drawrate":
-          return gamesWith ? drawsWith / gamesWith : 0;
-        case "buyCount":
-          return gamesWith;
-        case "presence":
-        case "pickrate":
-          return games ? gamesWith / games : 0;
-        case "buyWinrate":
-          return gamesWith ? winsWith / gamesWith : 0;
-        case "buyLossrate":
-          return gamesWith ? lossesWith / gamesWith : 0;
-        case "endCount":
-          return gamesEnd;
-        case "endRate":
-          return games ? gamesEnd / games : 0;
-        case "endWinrate":
-          return gamesEnd ? winsEnd / gamesEnd : 0;
-        case "endLossrate":
-          return gamesEnd ? lossesEnd / gamesEnd : 0;
-        default:
-          return row.perk_name;
-      }
-    }, perkOrder);
-  }, [stats.perkStats, stats.totalGames, perkSort, perkOrder]);
+    return expandWithMeta(stats.perkStats, "perk_name", perkMetaMap, perkSort).sort((a, b) =>
+      compareRows(a, b, perkSort, perkOrder, stats.totalGames, "perk_name")
+    );
+  }, [stats.perkStats, stats.totalGames, perkSort, perkOrder, perkMetaMap, itemPackFilter]);
   const sortedToyStats = useMemo(() => {
-    return sortRows(stats.toyStats, (row) => {
-      const games = Number(stats.totalGames || 0);
-      const gamesWith = Number(row.games_with || 0);
-      const winsWith = Number(row.wins_with || 0);
-      const drawsWith = Number(row.draws_with || 0);
-      const lossesWith = Math.max(0, gamesWith - winsWith - drawsWith);
-      const gamesEnd = Number(row.games_end || 0);
-      const winsEnd = Number(row.wins_end || 0);
-      const drawsEnd = Number(row.draws_end || 0);
-      const lossesEnd = Math.max(0, gamesEnd - winsEnd - drawsEnd);
-      switch (toySort) {
-        case "name":
-          return row.toy_name;
-        case "count":
-          return gamesWith;
-        case "winrate":
-          return gamesWith ? winsWith / gamesWith : 0;
-        case "lossrate":
-          return gamesWith ? lossesWith / gamesWith : 0;
-        case "drawrate":
-          return gamesWith ? drawsWith / gamesWith : 0;
-        case "buyCount":
-          return gamesWith;
-        case "presence":
-        case "pickrate":
-          return games ? gamesWith / games : 0;
-        case "buyWinrate":
-          return gamesWith ? winsWith / gamesWith : 0;
-        case "buyLossrate":
-          return gamesWith ? lossesWith / gamesWith : 0;
-        case "endCount":
-          return gamesEnd;
-        case "endRate":
-          return games ? gamesEnd / games : 0;
-        case "endWinrate":
-          return gamesEnd ? winsEnd / gamesEnd : 0;
-        case "endLossrate":
-          return gamesEnd ? lossesEnd / gamesEnd : 0;
-        default:
-          return row.toy_name;
-      }
-    }, toyOrder);
-  }, [stats.toyStats, stats.totalGames, toySort, toyOrder]);
+    return expandWithMeta(stats.toyStats, "toy_name", toyMetaMap, toySort).sort((a, b) =>
+      compareRows(a, b, toySort, toyOrder, stats.totalGames, "toy_name")
+    );
+  }, [stats.toyStats, stats.totalGames, toySort, toyOrder, toyMetaMap, itemPackFilter]);
   const totalPetCount = useMemo(
-    () => sortedPetStats.reduce((sum, row) => sum + Number(row.games_with || 0), 0),
-    [sortedPetStats]
+    () => (stats.petStats || []).reduce((sum, row) => sum + Number(row.games_with || 0), 0),
+    [stats.petStats]
   );
   const totalPerkCount = useMemo(
-    () => sortedPerkStats.reduce((sum, row) => sum + Number(row.games_with || 0), 0),
-    [sortedPerkStats]
+    () => (stats.perkStats || []).reduce((sum, row) => sum + Number(row.games_with || 0), 0),
+    [stats.perkStats]
   );
   const totalToyCount = useMemo(
-    () => sortedToyStats.reduce((sum, row) => sum + Number(row.games_with || 0), 0),
-    [sortedToyStats]
+    () => (stats.toyStats || []).reduce((sum, row) => sum + Number(row.games_with || 0), 0),
+    [stats.toyStats]
   );
   const totalPackEntries = useMemo(
     () => sortedPackStats.reduce((sum, row) => sum + Number(row.games || 0), 0),
@@ -907,11 +909,33 @@ export default function StatsPage() {
               ))}
             </select>
           </div>
+          <div className="field">
+            <label>Exclude Mirrors</label>
+            <select
+              value={filters.excludeMirrors ? "yes" : "no"}
+              onChange={(e) => setFilters({ ...filters, excludeMirrors: e.target.value === "yes" })}
+            >
+              <option value="no">No</option>
+              <option value="yes">Yes</option>
+            </select>
+          </div>
+          <div className="field">
+            <label>Item Pack Group</label>
+            <select value={filters.itemPack} onChange={(e) => setFilters({ ...filters, itemPack: e.target.value })}>
+              <option value="">All Packs</option>
+              {packOptions.map((pack) => (
+                <option key={`item-pack-${pack.id}`} value={pack.name}>{pack.name}</option>
+              ))}
+            </select>
+          </div>
           {filters.scope === "battle" && (
             <>
               <div className="field">
                 <label>
-                  <SemanticLabel type="turn">Min Turn</SemanticLabel>
+                  <span className="multi-label-with-icon">
+                    <img src={turnFilterSprite} alt="" className="multi-label-icon" />
+                    <span>Min Turn</span>
+                  </span>
                 </label>
                 <input
                   type="number"
@@ -923,7 +947,10 @@ export default function StatsPage() {
               </div>
               <div className="field">
                 <label>
-                  <SemanticLabel type="turn">Max Turn</SemanticLabel>
+                  <span className="multi-label-with-icon">
+                    <img src={turnFilterSprite} alt="" className="multi-label-icon" />
+                    <span>Max Turn</span>
+                  </span>
                 </label>
                 <input
                   type="number"
@@ -1067,7 +1094,13 @@ export default function StatsPage() {
       <section className="section">
         <div className="results-header">
           <h2>Pack Stats</h2>
+          <div className="results-actions">
+            <button type="button" className="ghost" onClick={() => toggleCollapsed("pack")}>
+              {collapsed.pack ? "Expand" : "Collapse"}
+            </button>
+          </div>
         </div>
+        {!collapsed.pack && (
         <div className={statsCardsClass}>
           {sortedPackStats.map((row) => {
             const games = Number(row.games || 0);
@@ -1086,7 +1119,7 @@ export default function StatsPage() {
                   <span>{filters.scope === "battle" ? "Rounds" : "Games"}: {games}</span>
                 </div>
                 <div className="stats-card-metrics">
-                  <div>Pickrate: {formatPct(totalPackEntries ? games / totalPackEntries : 0)}</div>
+                  <div>Pack Share: {formatPct(totalPackEntries ? games / totalPackEntries : 0)}</div>
                   <div className="rate-win">Winrate: {formatPct(games ? wins / games : 0)}</div>
                   <div className="rate-loss">Lossrate: {formatPct(games ? losses / games : 0)}</div>
                   {filters.scope === "battle" ? (
@@ -1100,6 +1133,7 @@ export default function StatsPage() {
             <div className="stats-card empty">No pack stats yet.</div>
           )}
         </div>
+        )}
       </section>
 
       <section className="section">
@@ -1107,7 +1141,12 @@ export default function StatsPage() {
           <h2>Pet Stats</h2>
           <div className="section-inline-filter">
             <IconMultiSelect
-              label=""
+              label={(
+                <span className="multi-label-with-icon">
+                  <img src={petFilterSprite} alt="" className="multi-label-icon" />
+                  <span>Pet Search</span>
+                </span>
+              )}
               options={petOptions}
               selected={filters.pet}
               onChange={(value) => {
@@ -1150,7 +1189,13 @@ export default function StatsPage() {
               </div>
             )}
           </div>
+          <div className="results-actions">
+            <button type="button" className="ghost" onClick={() => toggleCollapsed("pet")}>
+              {collapsed.pet ? "Expand" : "Collapse"}
+            </button>
+          </div>
         </div>
+        {!collapsed.pet && (
         <div className={statsCardsClass}>
           {sortedPetStats.map((row) => {
             const games = Number(stats.totalGames || 0);
@@ -1163,12 +1208,16 @@ export default function StatsPage() {
             const lossesWith = Math.max(0, gamesWith - winsWith - drawsWith);
             const lossesEnd = Math.max(0, gamesEnd - winsEnd - drawsEnd);
             return (
-              <div className="stats-card" key={row.pet_name}>
+              <div className="stats-card" key={`${row.pet_name}-${row._pack || "all"}`}>
                 <div className="stats-card-head">
                   {petSprite(row.pet_name) ? (
                     <img src={petSprite(row.pet_name)} alt="" />
                   ) : null}
                   <h4>{row.pet_name}</h4>
+                </div>
+                <div className="stats-card-meta">
+                  <span>Tier: {row._tier ?? "?"}</span>
+                  <span>Pack: {row._pack || "Unassigned"}</span>
                 </div>
                 {filters.scope === "battle" ? (
                   <>
@@ -1183,7 +1232,7 @@ export default function StatsPage() {
                   <>
                     <div className="stats-card-meta">Buy: {gamesWith}</div>
                     <div className="stats-card-metrics">
-                      <div>Pickrate: {formatPct(games ? gamesWith / games : 0)}</div>
+                      <div>{appearanceLabel}: {formatPct(games ? gamesWith / games : 0)}</div>
                       <div className="rate-win">Winrate (Buy): {formatPct(gamesWith ? winsWith / gamesWith : 0)}</div>
                       <div className="rate-loss">Lossrate (Buy): {formatPct(gamesWith ? lossesWith / gamesWith : 0)}</div>
                       <div>End: {gamesEnd}</div>
@@ -1200,6 +1249,7 @@ export default function StatsPage() {
             <div className="stats-card empty">No pet stats yet.</div>
           )}
         </div>
+        )}
       </section>
 
       <section className="section">
@@ -1207,7 +1257,12 @@ export default function StatsPage() {
           <h2>Perk Stats</h2>
           <div className="section-inline-filter">
             <IconMultiSelect
-              label="Perk Search"
+              label={(
+                <span className="multi-label-with-icon">
+                  <img src={perkFilterSprite} alt="" className="multi-label-icon" />
+                  <span>Perk Search</span>
+                </span>
+              )}
               options={perkOptions}
               selected={filters.perk}
               onChange={(value) => {
@@ -1250,7 +1305,13 @@ export default function StatsPage() {
               </div>
             )}
           </div>
+          <div className="results-actions">
+            <button type="button" className="ghost" onClick={() => toggleCollapsed("perk")}>
+              {collapsed.perk ? "Expand" : "Collapse"}
+            </button>
+          </div>
         </div>
+        {!collapsed.perk && (
         <div className={statsCardsClass}>
           {sortedPerkStats.map((row) => {
             const games = Number(stats.totalGames || 0);
@@ -1263,12 +1324,16 @@ export default function StatsPage() {
             const lossesWith = Math.max(0, gamesWith - winsWith - drawsWith);
             const lossesEnd = Math.max(0, gamesEnd - winsEnd - drawsEnd);
             return (
-              <div className="stats-card" key={`perk-${row.perk_name}`}>
+              <div className="stats-card" key={`perk-${row.perk_name}-${row._pack || "all"}`}>
                 <div className="stats-card-head">
                   {perkSprite(row.perk_name) ? (
                     <img src={perkSprite(row.perk_name)} alt="" />
                   ) : null}
                   <h4>{row.perk_name}</h4>
+                </div>
+                <div className="stats-card-meta">
+                  <span>Tier: {row._tier ?? "?"}</span>
+                  <span>Pack: {row._pack || "Unassigned"}</span>
                 </div>
                 {filters.scope === "battle" ? (
                   <>
@@ -1283,7 +1348,7 @@ export default function StatsPage() {
                   <>
                     <div className="stats-card-meta">Buy: {gamesWith}</div>
                     <div className="stats-card-metrics">
-                      <div>Pickrate: {formatPct(games ? gamesWith / games : 0)}</div>
+                      <div>{appearanceLabel}: {formatPct(games ? gamesWith / games : 0)}</div>
                       <div className="rate-win">Winrate (Buy): {formatPct(gamesWith ? winsWith / gamesWith : 0)}</div>
                       <div className="rate-loss">Lossrate (Buy): {formatPct(gamesWith ? lossesWith / gamesWith : 0)}</div>
                       <div>End: {gamesEnd}</div>
@@ -1300,6 +1365,7 @@ export default function StatsPage() {
             <div className="stats-card empty">No perk stats yet.</div>
           )}
         </div>
+        )}
       </section>
 
       <section className="section">
@@ -1307,7 +1373,12 @@ export default function StatsPage() {
           <h2>Toy Stats</h2>
           <div className="section-inline-filter">
             <IconMultiSelect
-              label="Toy Search"
+              label={(
+                <span className="multi-label-with-icon">
+                  <img src={toyFilterSprite} alt="" className="multi-label-icon" />
+                  <span>Toy Search</span>
+                </span>
+              )}
               options={toyOptions}
               selected={filters.toy}
               onChange={(value) => {
@@ -1350,7 +1421,13 @@ export default function StatsPage() {
               </div>
             )}
           </div>
+          <div className="results-actions">
+            <button type="button" className="ghost" onClick={() => toggleCollapsed("toy")}>
+              {collapsed.toy ? "Expand" : "Collapse"}
+            </button>
+          </div>
         </div>
+        {!collapsed.toy && (
         <div className={statsCardsClass}>
           {sortedToyStats.map((row) => {
             const games = Number(stats.totalGames || 0);
@@ -1363,12 +1440,16 @@ export default function StatsPage() {
             const lossesWith = Math.max(0, gamesWith - winsWith - drawsWith);
             const lossesEnd = Math.max(0, gamesEnd - winsEnd - drawsEnd);
             return (
-              <div className="stats-card" key={`toy-${row.toy_name}`}>
+              <div className="stats-card" key={`toy-${row.toy_name}-${row._pack || "all"}`}>
                 <div className="stats-card-head">
                   {toySprite(row.toy_name) ? (
                     <img src={toySprite(row.toy_name)} alt="" />
                   ) : null}
                   <h4>{row.toy_name}</h4>
+                </div>
+                <div className="stats-card-meta">
+                  <span>Tier: {row._tier ?? "?"}</span>
+                  <span>Pack: {row._pack || "Unassigned"}</span>
                 </div>
                 {filters.scope === "battle" ? (
                   <>
@@ -1383,7 +1464,7 @@ export default function StatsPage() {
                   <>
                     <div className="stats-card-meta">Buy: {gamesWith}</div>
                     <div className="stats-card-metrics">
-                      <div>Pickrate: {formatPct(games ? gamesWith / games : 0)}</div>
+                      <div>{appearanceLabel}: {formatPct(games ? gamesWith / games : 0)}</div>
                       <div className="rate-win">Winrate (Buy): {formatPct(gamesWith ? winsWith / gamesWith : 0)}</div>
                       <div className="rate-loss">Lossrate (Buy): {formatPct(gamesWith ? lossesWith / gamesWith : 0)}</div>
                       <div>End: {gamesEnd}</div>
@@ -1400,6 +1481,7 @@ export default function StatsPage() {
             <div className="stats-card empty">No toy stats yet.</div>
           )}
         </div>
+        )}
       </section>
     </main>
   );

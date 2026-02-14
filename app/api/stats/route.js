@@ -37,6 +37,7 @@ export async function GET(req) {
   const { searchParams } = new URL(req.url);
   const pack = searchParams.get("pack") || "";
   const opponentPack = searchParams.get("opponentPack") || "";
+  const excludeMirrors = searchParams.get("excludeMirrors") === "true";
   const player = searchParams.get("player") || "";
   const playerId = searchParams.get("playerId") || "";
   const minTurnRaw = searchParams.get("minTurn");
@@ -88,6 +89,9 @@ export async function GET(req) {
   } else if (opponentPack) {
     values.push(opponentPack);
     clauses.push(`(r.pack = $${values.length} or r.opponent_pack = $${values.length})`);
+  }
+  if (excludeMirrors) {
+    clauses.push(`r.pack <> r.opponent_pack`);
   }
   if (player) {
     values.push(`%${player}%`);

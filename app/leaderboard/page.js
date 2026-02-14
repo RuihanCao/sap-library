@@ -101,7 +101,8 @@ const THEMES = {
 };
 
 const EXCLUDED_PACKS = ["Custom", "Weekly"];
-const MIN_MATCH_THRESHOLD = 10;
+const DEFAULT_MIN_MATCH_THRESHOLD = 10;
+const MIN_MATCH_THRESHOLD = 1;
 const FILTER_FALLBACK_SPRITES = {
   pet: "/Sprite/Pets/Turtle.png",
   perk: "/Sprite/Food/Honey.png",
@@ -111,7 +112,7 @@ const FILTER_FALLBACK_SPRITES = {
 const DEFAULT_FILTERS = {
   scope: "game",
   search: "",
-  minMatches: String(MIN_MATCH_THRESHOLD),
+  minMatches: String(DEFAULT_MIN_MATCH_THRESHOLD),
   version: "current",
   pack: "",
   opponentPack: "",
@@ -159,7 +160,7 @@ function defaultOrderForSort(sortKey) {
 
 function normalizeMinMatches(value) {
   const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) return String(MIN_MATCH_THRESHOLD);
+  if (!Number.isFinite(parsed) || parsed <= 0) return String(DEFAULT_MIN_MATCH_THRESHOLD);
   return String(Math.max(MIN_MATCH_THRESHOLD, Math.floor(parsed)));
 }
 
@@ -402,7 +403,7 @@ export default function LeaderboardPage() {
       ...DEFAULT_FILTERS,
       scope: params.get("scope") === "battle" ? "battle" : "game",
       search: params.get("search") || "",
-      minMatches: normalizeMinMatches(params.get("minMatches") || String(MIN_MATCH_THRESHOLD)),
+      minMatches: normalizeMinMatches(params.get("minMatches") || String(DEFAULT_MIN_MATCH_THRESHOLD)),
       version: params.get("version") || "current",
       pack: params.get("pack") || "",
       opponentPack: params.get("opponentPack") || "",
@@ -537,7 +538,7 @@ export default function LeaderboardPage() {
               />
             </div>
             <div className="field">
-              <label>Min Match Threshold (10+)</label>
+              <label>Min Match Threshold (1+)</label>
               <input
                 type="number"
                 min={MIN_MATCH_THRESHOLD}
@@ -545,7 +546,7 @@ export default function LeaderboardPage() {
                 value={filters.minMatches}
                 onChange={(e) => setFilters({ ...filters, minMatches: e.target.value })}
                 onBlur={(e) => setFilters({ ...filters, minMatches: normalizeMinMatches(e.target.value) })}
-                placeholder={String(MIN_MATCH_THRESHOLD)}
+                placeholder={String(DEFAULT_MIN_MATCH_THRESHOLD)}
               />
             </div>
             <div className="field">
@@ -614,36 +615,6 @@ export default function LeaderboardPage() {
                 </div>
               </>
             )}
-            <div className="field">
-              <label>Sort</label>
-              <select
-                value={filters.sort}
-                onChange={(e) => setFilters({ ...filters, sort: e.target.value })}
-              >
-                <option value="games">Games</option>
-                <option value="rounds">Rounds</option>
-                <option value="wins">Wins</option>
-                <option value="losses">Losses</option>
-                <option value="draws">Draws</option>
-                <option value="winrate">Winrate</option>
-                <option value="lossrate">Lossrate</option>
-                <option value="drawrate">Drawrate</option>
-                <option value="avg_rolls">Avg Rolls/Turn</option>
-                <option value="avg_gold" className="gold-text">Avg Gold/Turn</option>
-                <option value="avg_summons">Avg Summons/Turn</option>
-                <option value="player_name">Player Name</option>
-              </select>
-            </div>
-            <div className="field">
-              <label>Order</label>
-              <select
-                value={filters.order}
-                onChange={(e) => setFilters({ ...filters, order: e.target.value })}
-              >
-                <option value="desc">Desc</option>
-                <option value="asc">Asc</option>
-              </select>
-            </div>
             <div className="field">
               <label>Page Size</label>
               <select

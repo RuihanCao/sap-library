@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 const EXCLUDED_PACKS = ["Custom", "Weekly"];
 const DEFAULT_PAGE_SIZE = 25;
 const MAX_PAGE_SIZE = 100;
-const MIN_MATCH_THRESHOLD = 10;
+const MIN_MATCH_THRESHOLD = 1;
 
 function parseList(value) {
   if (!value) return [];
