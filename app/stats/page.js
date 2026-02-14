@@ -721,6 +721,12 @@ export default function StatsPage() {
     }
     if (metricCompare !== 0) return metricCompare;
 
+    if (sortMetric === "pack") {
+      const tierA = Number.isFinite(Number(a._tier)) ? Number(a._tier) : Number.POSITIVE_INFINITY;
+      const tierB = Number.isFinite(Number(b._tier)) ? Number(b._tier) : Number.POSITIVE_INFINITY;
+      if (tierA !== tierB) return tierA - tierB;
+    }
+
     if (sortMetric !== "pack") {
       const packCompare = (packOrderMap[a._pack] ?? 999) - (packOrderMap[b._pack] ?? 999);
       if (packCompare !== 0) return packCompare;
