@@ -660,7 +660,7 @@ export default function ProfilePage() {
 
             <div className="leaderboard-detail-grid">
               <div className="leaderboard-detail-block">
-                <h3>Pack Presence</h3>
+                <h3>Pack Pickrate</h3>
                 <div className="stats-cards">
                   {detail.packStats?.map((row) => (
                     <div className="stats-card" key={`pack-${row.pack}`}>

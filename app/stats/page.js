@@ -158,7 +158,7 @@ function parseCsvList(value) {
 }
 
 function normalizeSortMetric(value) {
-  return value === "pickrate" ? "presence" : value;
+  return value === "presence" ? "pickrate" : value;
 }
 
 const DEFAULT_STATS_FILTERS = {
@@ -568,7 +568,7 @@ export default function StatsPage() {
     : [
         { value: "name", label: "Name" },
         { value: "buyCount", label: "Buy Count" },
-        { value: "presence", label: "Presence" },
+        { value: "pickrate", label: "Pickrate" },
         { value: "buyWinrate", label: "Winrate (Buy)" },
         { value: "buyLossrate", label: "Lossrate (Buy)" },
         { value: "endCount", label: "End Count" },
@@ -1057,7 +1057,7 @@ export default function StatsPage() {
                   <span>{filters.scope === "battle" ? "Rounds" : "Games"}: {games}</span>
                 </div>
                 <div className="stats-card-metrics">
-                  <div>Presence: {formatPct(totalPackEntries ? games / totalPackEntries : 0)}</div>
+                  <div>Pickrate: {formatPct(totalPackEntries ? games / totalPackEntries : 0)}</div>
                   <div className="rate-win">Winrate: {formatPct(games ? wins / games : 0)}</div>
                   <div className="rate-loss">Lossrate: {formatPct(games ? losses / games : 0)}</div>
                   {filters.scope === "battle" ? (
@@ -1154,7 +1154,7 @@ export default function StatsPage() {
                   <>
                     <div className="stats-card-meta">Buy: {gamesWith}</div>
                     <div className="stats-card-metrics">
-                      <div>Presence: {formatPct(games ? gamesWith / games : 0)}</div>
+                      <div>Pickrate: {formatPct(games ? gamesWith / games : 0)}</div>
                       <div className="rate-win">Winrate (Buy): {formatPct(gamesWith ? winsWith / gamesWith : 0)}</div>
                       <div className="rate-loss">Lossrate (Buy): {formatPct(gamesWith ? lossesWith / gamesWith : 0)}</div>
                       <div>End: {gamesEnd}</div>
@@ -1254,7 +1254,7 @@ export default function StatsPage() {
                   <>
                     <div className="stats-card-meta">Buy: {gamesWith}</div>
                     <div className="stats-card-metrics">
-                      <div>Presence: {formatPct(games ? gamesWith / games : 0)}</div>
+                      <div>Pickrate: {formatPct(games ? gamesWith / games : 0)}</div>
                       <div className="rate-win">Winrate (Buy): {formatPct(gamesWith ? winsWith / gamesWith : 0)}</div>
                       <div className="rate-loss">Lossrate (Buy): {formatPct(gamesWith ? lossesWith / gamesWith : 0)}</div>
                       <div>End: {gamesEnd}</div>
@@ -1354,7 +1354,7 @@ export default function StatsPage() {
                   <>
                     <div className="stats-card-meta">Buy: {gamesWith}</div>
                     <div className="stats-card-metrics">
-                      <div>Presence: {formatPct(games ? gamesWith / games : 0)}</div>
+                      <div>Pickrate: {formatPct(games ? gamesWith / games : 0)}</div>
                       <div className="rate-win">Winrate (Buy): {formatPct(gamesWith ? winsWith / gamesWith : 0)}</div>
                       <div className="rate-loss">Lossrate (Buy): {formatPct(gamesWith ? lossesWith / gamesWith : 0)}</div>
                       <div>End: {gamesEnd}</div>
