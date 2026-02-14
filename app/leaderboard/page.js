@@ -1,7 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { PackInlineName, PackMatchupInline } from "@/app/components/pack-inline";
+import { SemanticLabel } from "@/app/components/semantic-label";
+import { getPackSprite } from "@/lib/packSprites";
 
 const BUILD_BACKGROUNDS = [
   "AboveCloudsBuild.png",
@@ -98,11 +101,17 @@ const THEMES = {
 };
 
 const EXCLUDED_PACKS = ["Custom", "Weekly"];
+const MIN_MATCH_THRESHOLD = 10;
+const FILTER_FALLBACK_SPRITES = {
+  pet: "/Sprite/Pets/Turtle.png",
+  perk: "/Sprite/Food/Honey.png",
+  toy: "/Sprite/Toys/RelicFoamSword.png"
+};
 
 const DEFAULT_FILTERS = {
   scope: "game",
   search: "",
-  minMatches: "1",
+  minMatches: String(MIN_MATCH_THRESHOLD),
   pack: "",
   opponentPack: "",
   pet: [],
@@ -111,7 +120,7 @@ const DEFAULT_FILTERS = {
   minTurn: "",
   maxTurn: "",
   tags: "",
-  sort: "games",
+  sort: "winrate",
   order: "desc",
   pageSize: "25"
 };
@@ -145,6 +154,17 @@ function fixed(value, digits = 2) {
 
 function defaultOrderForSort(sortKey) {
   return sortKey === "player_name" ? "asc" : "desc";
+}
+
+function normalizeMinMatches(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return String(MIN_MATCH_THRESHOLD);
+  return String(Math.max(MIN_MATCH_THRESHOLD, Math.floor(parsed)));
+}
+
+function pickFilterSprite(list, fallbackSprite) {
+  const sprite = Array.isArray(list) ? list.find((item) => item?.sprite)?.sprite : "";
+  return sprite || fallbackSprite;
 }
 
 function IconMultiSelect({ label, options, selected, onChange, placeholder }) {
@@ -224,12 +244,15 @@ export default function LeaderboardPage() {
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailModalOpen, setDetailModalOpen] = useState(false);
+  const listSentinelRef = useRef(null);
 
-  const totalPages = Math.max(1, Math.ceil(total / Number(filters.pageSize || 25)));
   const packOptions = useMemo(
     () => (meta.packs || []).filter((pack) => !EXCLUDED_PACKS.includes(pack.name)),
     [meta.packs]
   );
+  const petFilterSprite = pickFilterSprite(meta.pets, FILTER_FALLBACK_SPRITES.pet);
+  const perkFilterSprite = pickFilterSprite(meta.perks, FILTER_FALLBACK_SPRITES.perk);
+  const toyFilterSprite = pickFilterSprite(meta.toys, FILTER_FALLBACK_SPRITES.toy);
 
   useEffect(() => {
     if (!BUILD_BACKGROUNDS.length) return;
@@ -258,7 +281,7 @@ export default function LeaderboardPage() {
     const params = new URLSearchParams();
     if (nextFilters.scope) params.set("scope", nextFilters.scope);
     if (nextFilters.search) params.set("search", nextFilters.search);
-    if (nextFilters.minMatches) params.set("minMatches", nextFilters.minMatches);
+    params.set("minMatches", normalizeMinMatches(nextFilters.minMatches));
     if (nextFilters.pack) params.set("pack", nextFilters.pack);
     if (nextFilters.opponentPack) params.set("opponentPack", nextFilters.opponentPack);
     if (nextFilters.pet.length) params.set("pet", nextFilters.pet.join(","));
@@ -316,12 +339,25 @@ export default function LeaderboardPage() {
   }
 
   async function loadLeaderboard(nextFilters = filters, nextPage = page, nextPlayerId = selectedPlayerId, options = {}) {
+    if (loading && options.append) return;
     const params = buildListParams(nextFilters, nextPage, nextPlayerId);
     setLoading(true);
     try {
       const res = await fetch(`/api/leaderboard?${params.toString()}`);
       const data = await res.json();
-      setPlayers(data.players || []);
+      const incoming = data.players || [];
+      setPlayers((prev) => {
+        if (!options.append) return incoming;
+        const seen = new Set(prev.map((item) => item.playerId));
+        const merged = [...prev];
+        for (const row of incoming) {
+          if (!seen.has(row.playerId)) {
+            merged.push(row);
+            seen.add(row.playerId);
+          }
+        }
+        return merged;
+      });
       setTotal(Number(data.total || 0));
       setPage(Number(data.page || nextPage));
 
@@ -329,10 +365,10 @@ export default function LeaderboardPage() {
         window.history.replaceState({}, "", `?${params.toString()}`);
       }
 
-      if (nextPlayerId) {
+      if (nextPlayerId && !options.append) {
         await loadDetail(nextPlayerId, nextFilters, { skipUrlSync: true });
       } else {
-        setDetail(null);
+        if (!nextPlayerId) setDetail(null);
       }
     } finally {
       setLoading(false);
@@ -345,7 +381,7 @@ export default function LeaderboardPage() {
       ...DEFAULT_FILTERS,
       scope: params.get("scope") === "battle" ? "battle" : "game",
       search: params.get("search") || "",
-      minMatches: params.get("minMatches") || "1",
+      minMatches: normalizeMinMatches(params.get("minMatches") || String(MIN_MATCH_THRESHOLD)),
       pack: params.get("pack") || "",
       opponentPack: params.get("opponentPack") || "",
       pet: parseCsvList(params.get("pet")),
@@ -354,7 +390,7 @@ export default function LeaderboardPage() {
       minTurn: params.get("minTurn") || "",
       maxTurn: params.get("maxTurn") || "",
       tags: params.get("tags") || "",
-      sort: params.get("sort") || "games",
+      sort: params.get("sort") || "winrate",
       order: params.get("order") || "desc",
       pageSize: params.get("pageSize") || "25"
     };
@@ -376,6 +412,25 @@ export default function LeaderboardPage() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [filters, page]);
+
+  useEffect(() => {
+    const node = listSentinelRef.current;
+    if (!node) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (!entry?.isIntersecting) return;
+        if (loading) return;
+        if (players.length >= total) return;
+        loadLeaderboard(filters, page + 1, selectedPlayerId, { append: true });
+      },
+      { root: null, rootMargin: "260px 0px", threshold: 0.01 }
+    );
+
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [players.length, total, page, loading, filters, selectedPlayerId]);
 
   function submitSearch(event) {
     event.preventDefault();
@@ -422,17 +477,17 @@ export default function LeaderboardPage() {
 
   return (
     <main>
-      <div className="top-nav">
-        <Link href="/" className="nav-link">Explorer</Link>
-        <Link href="/stats" className="nav-link">Stats</Link>
-        <Link href="/leaderboard" className="nav-link active">Leaderboard</Link>
-      </div>
-
       <section className="hero">
         <div className="hero-copy">
           <h1>Sap Library</h1>
           <p>Player leaderboard and deep profile analytics by user ID.</p>
         </div>
+        <nav className="top-nav">
+          <Link href="/" className="nav-link">Explorer</Link>
+          <Link href="/stats" className="nav-link">Stats</Link>
+          <Link href="/leaderboard" className="nav-link active">Leaderboard</Link>
+          <Link href="/profile" className="nav-link">Profile</Link>
+        </nav>
       </section>
 
       <section className="section filters-section">
@@ -460,11 +515,15 @@ export default function LeaderboardPage() {
               />
             </div>
             <div className="field">
-              <label>Min Match Threshold</label>
+              <label>Min Match Threshold (10+)</label>
               <input
+                type="number"
+                min={MIN_MATCH_THRESHOLD}
+                step="1"
                 value={filters.minMatches}
                 onChange={(e) => setFilters({ ...filters, minMatches: e.target.value })}
-                placeholder="1"
+                onBlur={(e) => setFilters({ ...filters, minMatches: normalizeMinMatches(e.target.value) })}
+                placeholder={String(MIN_MATCH_THRESHOLD)}
               />
             </div>
             <div className="field">
@@ -494,7 +553,9 @@ export default function LeaderboardPage() {
             {filters.scope === "battle" && (
               <>
                 <div className="field">
-                  <label>Min Turn</label>
+                  <label>
+                    <SemanticLabel type="turn">Min Turn</SemanticLabel>
+                  </label>
                   <input
                     value={filters.minTurn}
                     onChange={(e) => setFilters({ ...filters, minTurn: e.target.value })}
@@ -502,7 +563,9 @@ export default function LeaderboardPage() {
                   />
                 </div>
                 <div className="field">
-                  <label>Max Turn</label>
+                  <label>
+                    <SemanticLabel type="turn">Max Turn</SemanticLabel>
+                  </label>
                   <input
                     value={filters.maxTurn}
                     onChange={(e) => setFilters({ ...filters, maxTurn: e.target.value })}
@@ -526,7 +589,7 @@ export default function LeaderboardPage() {
                 <option value="lossrate">Lossrate</option>
                 <option value="drawrate">Drawrate</option>
                 <option value="avg_rolls">Avg Rolls/Turn</option>
-                <option value="avg_gold">Avg Gold/Turn</option>
+                <option value="avg_gold" className="gold-text">Avg Gold/Turn</option>
                 <option value="avg_summons">Avg Summons/Turn</option>
                 <option value="player_name">Player Name</option>
               </select>
@@ -562,21 +625,36 @@ export default function LeaderboardPage() {
               />
             </div>
             <IconMultiSelect
-              label="Pet Filter"
+              label={(
+                <span className="multi-label-with-icon">
+                  <img src={petFilterSprite} alt="" className="multi-label-icon" />
+                  <span>Pet Filter</span>
+                </span>
+              )}
               options={meta.pets || []}
               selected={filters.pet}
               onChange={(value) => setFilters({ ...filters, pet: value })}
               placeholder="Search pets and add"
             />
             <IconMultiSelect
-              label="Perk Filter"
+              label={(
+                <span className="multi-label-with-icon">
+                  <img src={perkFilterSprite} alt="" className="multi-label-icon" />
+                  <span>Perk Filter</span>
+                </span>
+              )}
               options={meta.perks || []}
               selected={filters.perk}
               onChange={(value) => setFilters({ ...filters, perk: value })}
               placeholder="Search perks and add"
             />
             <IconMultiSelect
-              label="Toy Filter"
+              label={(
+                <span className="multi-label-with-icon">
+                  <img src={toyFilterSprite} alt="" className="multi-label-icon" />
+                  <span>Toy Filter</span>
+                </span>
+              )}
               options={meta.toys || []}
               selected={filters.toy}
               onChange={(value) => setFilters({ ...filters, toy: value })}
@@ -624,44 +702,54 @@ export default function LeaderboardPage() {
             <button type="button" className={`leaderboard-sort-btn ${filters.sort === "avg_rolls" ? "active" : ""}`} onClick={() => toggleSort("avg_rolls")}>
               Avg Rolls <span>{sortIndicator("avg_rolls")}</span>
             </button>
-            <button type="button" className={`leaderboard-sort-btn ${filters.sort === "avg_gold" ? "active" : ""}`} onClick={() => toggleSort("avg_gold")}>
+            <button type="button" className={`leaderboard-sort-btn gold-text ${filters.sort === "avg_gold" ? "active" : ""}`} onClick={() => toggleSort("avg_gold")}>
               Avg Gold <span>{sortIndicator("avg_gold")}</span>
             </button>
           </div>
-          {players.map((player) => (
-            <button
-              key={player.playerId}
-              type="button"
-              className={`leaderboard-row${selectedPlayerId === player.playerId ? " active" : ""}`}
-              onClick={() => selectPlayer(player.playerId)}
-            >
-              <span className="player-cell">
-                <strong>{player.playerName || "Unknown"}</strong>
-                <small>{player.playerId}</small>
-              </span>
-              <span>{player.games}</span>
-              <span>{player.rounds}</span>
-              <span>{player.wins}</span>
-              <span>{player.losses}</span>
-              <span className="col-draw">{player.draws}</span>
-              <span>{pct(player.winrate)}</span>
-              <span>{fixed(player.avgRollsPerTurn)}</span>
-              <span>{fixed(player.avgGoldPerTurn)}</span>
-            </button>
-          ))}
+          {players.map((player) => {
+            const mostPlayedPackSprite = getPackSprite(player.mostPlayedPack);
+
+            return (
+              <button
+                key={player.playerId}
+                type="button"
+                className={`leaderboard-row${selectedPlayerId === player.playerId ? " active" : ""}`}
+                onClick={() => selectPlayer(player.playerId)}
+              >
+                <span className="player-cell">
+                  <strong className="player-name-line">
+                    {mostPlayedPackSprite ? (
+                      <img
+                        src={mostPlayedPackSprite}
+                        alt={player.mostPlayedPack ? `${player.mostPlayedPack} pack pet` : "Pack pet"}
+                        className="player-pack-pet"
+                        title={player.mostPlayedPack ? `Most played pack: ${player.mostPlayedPack}` : "Most played pack"}
+                      />
+                    ) : null}
+                    <span>{player.playerName || "Unknown"}</span>
+                  </strong>
+                  <small>{player.playerId}</small>
+                </span>
+                <span>{player.games}</span>
+                <span>{player.rounds}</span>
+                <span className="rate-win">{player.wins}</span>
+                <span className="rate-loss">{player.losses}</span>
+                <span className="col-draw">{player.draws}</span>
+                <span className="rate-win">{pct(player.winrate)}</span>
+                <span>{fixed(player.avgRollsPerTurn)}</span>
+                <span className="gold-text">{fixed(player.avgGoldPerTurn)}</span>
+              </button>
+            );
+          })}
           {!loading && players.length === 0 && (
             <div className="leaderboard-empty">No players match these filters.</div>
           )}
         </div>
 
-        <div className="pagination">
-          <button disabled={page <= 1 || loading} onClick={() => loadLeaderboard(filters, page - 1, selectedPlayerId)}>
-            Prev
-          </button>
-          <div className="page-info">Page {page} / {totalPages}</div>
-          <button disabled={page >= totalPages || loading} onClick={() => loadLeaderboard(filters, page + 1, selectedPlayerId)}>
-            Next
-          </button>
+        <div className="infinite-footer">
+          <div className="page-info">{players.length} / {total}</div>
+          <div ref={listSentinelRef} className="list-sentinel" />
+          {loading && players.length < total ? <div className="muted">Loading more...</div> : null}
         </div>
       </section>
 
@@ -696,11 +784,11 @@ export default function LeaderboardPage() {
                   </div>
                   <div className="stats-summary-item">
                     <span className="label">Wins</span>
-                    <strong>{Number(detail.summary?.wins || 0)}</strong>
+                    <strong className="rate-win">{Number(detail.summary?.wins || 0)}</strong>
                   </div>
                   <div className="stats-summary-item">
                     <span className="label">Losses</span>
-                    <strong>{Number(detail.summary?.losses || 0)}</strong>
+                    <strong className="rate-loss">{Number(detail.summary?.losses || 0)}</strong>
                   </div>
                   {filters.scope === "battle" && (
                     <div className="stats-summary-item">
@@ -710,11 +798,11 @@ export default function LeaderboardPage() {
                   )}
                   <div className="stats-summary-item">
                     <span className="label">Winrate</span>
-                    <strong>{pct(detail.summary?.winrate)}</strong>
+                    <strong className="rate-win">{pct(detail.summary?.winrate)}</strong>
                   </div>
                   <div className="stats-summary-item">
                     <span className="label">Lossrate</span>
-                    <strong>{pct(detail.summary?.lossrate)}</strong>
+                    <strong className="rate-loss">{pct(detail.summary?.lossrate)}</strong>
                   </div>
                   {filters.scope === "battle" && (
                     <div className="stats-summary-item">
@@ -723,30 +811,34 @@ export default function LeaderboardPage() {
                     </div>
                   )}
                   <div className="stats-summary-item">
-                    <span className="label">Avg Rolls/Turn</span>
+                    <span className="label">
+                      <SemanticLabel type="turn">Avg Rolls/Turn</SemanticLabel>
+                    </span>
                     <strong>{fixed(detail.summary?.avgRollsPerTurn)}</strong>
                   </div>
                   <div className="stats-summary-item">
-                    <span className="label">Avg Gold/Turn</span>
-                    <strong>{fixed(detail.summary?.avgGoldPerTurn)}</strong>
+                    <span className="label gold-text">
+                      <SemanticLabel type="turn">Avg Gold/Turn</SemanticLabel>
+                    </span>
+                    <strong className="gold-text">{fixed(detail.summary?.avgGoldPerTurn)}</strong>
                   </div>
                 </div>
 
                 <div className="leaderboard-detail-grid">
                   <div className="leaderboard-detail-block">
-                    <h3>Pack Pickrate</h3>
+                    <h3>Pack Presence</h3>
                     <div className="stats-cards">
                       {detail.packStats?.map((row) => (
                         <div className="stats-card" key={`pack-${row.pack}`}>
                           <div className="stats-card-head">
-                            <h4>{row.pack}</h4>
+                            <PackInlineName name={row.pack} className="pack-name-inline stats-card-pack-inline" />
                           </div>
                           <div className="stats-card-metrics">
                             <div>{filters.scope === "battle" ? "Rounds" : "Games"}: {Number(row.rounds ?? row.games ?? 0)}</div>
-                            <div>Wins: {Number(row.wins || 0)}</div>
-                            <div>Losses: {Number(row.losses || 0)}</div>
+                            <div className="rate-win">Wins: {Number(row.wins || 0)}</div>
+                            <div className="rate-loss">Losses: {Number(row.losses || 0)}</div>
                             {filters.scope === "battle" && <div>Draws: {Number(row.draws || 0)}</div>}
-                            <div>Winrate: {pct(row.winrate)}</div>
+                            <div className="rate-win">Winrate: {pct(row.winrate)}</div>
                           </div>
                         </div>
                       ))}
@@ -767,12 +859,14 @@ export default function LeaderboardPage() {
                       </div>
                       {detail.matchupStats?.map((row) => (
                         <div className={`leaderboard-subrow matchup ${filters.scope === "battle" ? "battle" : "game"}`} key={`${row.pack}-${row.opponent_pack}`}>
-                          <span>{row.pack} vs {row.opponent_pack}</span>
+                          <span>
+                            <PackMatchupInline pack={row.pack} opponentPack={row.opponent_pack} />
+                          </span>
                           <span>{Number(row.rounds ?? row.games ?? 0)}</span>
-                          <span>{Number(row.wins || 0)}</span>
-                          <span>{Number(row.losses || 0)}</span>
+                          <span className="rate-win">{Number(row.wins || 0)}</span>
+                          <span className="rate-loss">{Number(row.losses || 0)}</span>
                           {filters.scope === "battle" && <span>{Number(row.draws || 0)}</span>}
-                          <span>{pct(row.winrate)}</span>
+                          <span className="rate-win">{pct(row.winrate)}</span>
                         </div>
                       ))}
                       {!detail.matchupStats?.length && (
@@ -785,33 +879,39 @@ export default function LeaderboardPage() {
                 </div>
 
                 <div className="leaderboard-detail-block">
-                  <h3>Per Turn Metrics</h3>
+                  <h3>
+                    <SemanticLabel type="turn">Per Turn Metrics</SemanticLabel>
+                  </h3>
                   <div className="leaderboard-subtable">
                     <div className="leaderboard-subrow turn head">
-                      <span>Turn</span>
+                      <span>
+                        <SemanticLabel type="turn">Turn</SemanticLabel>
+                      </span>
                       <span>Rounds</span>
                       <span>Wins</span>
                       <span>Losses</span>
                       <span>Draws</span>
                       <span>Winrate</span>
                       <span>Avg Rolls</span>
-                      <span>Avg Gold</span>
+                      <span className="gold-text">Avg Gold</span>
                     </div>
                     {detail.perTurn?.map((row) => (
                       <div className="leaderboard-subrow turn" key={`turn-${row.turn_number}`}>
                         <span>{row.turn_number}</span>
                         <span>{Number(row.rounds || 0)}</span>
-                        <span>{Number(row.wins || 0)}</span>
-                        <span>{Number(row.losses || 0)}</span>
+                        <span className="rate-win">{Number(row.wins || 0)}</span>
+                        <span className="rate-loss">{Number(row.losses || 0)}</span>
                         <span>{Number(row.draws || 0)}</span>
-                        <span>{pct(row.winrate)}</span>
+                        <span className="rate-win">{pct(row.winrate)}</span>
                         <span>{fixed(row.avg_rolls_per_turn)}</span>
-                        <span>{fixed(row.avg_gold_per_turn)}</span>
+                        <span className="gold-text">{fixed(row.avg_gold_per_turn)}</span>
                       </div>
                     ))}
                     {!detail.perTurn?.length && (
                       <div className="leaderboard-subrow empty">
-                        <span>No turn-level rows.</span>
+                        <span>
+                          <SemanticLabel type="turn">No turn-level rows.</SemanticLabel>
+                        </span>
                       </div>
                     )}
                   </div>

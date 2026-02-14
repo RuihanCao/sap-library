@@ -7,6 +7,7 @@ export const dynamic = "force-dynamic";
 const EXCLUDED_PACKS = ["Custom", "Weekly"];
 const DEFAULT_PAGE_SIZE = 25;
 const MAX_PAGE_SIZE = 100;
+const MIN_MATCH_THRESHOLD = 10;
 
 function parseList(value) {
   if (!value) return [];
@@ -219,6 +220,23 @@ function buildGameSql(orderBy) {
       from turn_rows tr
       group by tr.spotlight_id
     ),
+    player_pack_counts as (
+      select
+        go.spotlight_id as player_id,
+        go.my_pack as pack,
+        count(*)::int as pack_games,
+        max(go.created_at) as last_seen_at
+      from game_outcomes go
+      where go.my_pack is not null
+      group by go.spotlight_id, go.my_pack
+    ),
+    player_top_pack as (
+      select distinct on (ppc.player_id)
+        ppc.player_id,
+        ppc.pack as most_played_pack
+      from player_pack_counts ppc
+      order by ppc.player_id, ppc.pack_games desc, ppc.last_seen_at desc, ppc.pack asc
+    ),
     joined as (
       select
         pr.player_id,
@@ -242,10 +260,12 @@ function buildGameSql(orderBy) {
         end as drawrate,
         coalesce(pta.avg_rolls_per_turn, 0::float8) as avg_rolls_per_turn,
         coalesce(pta.avg_gold_per_turn, 0::float8) as avg_gold_per_turn,
-        coalesce(pta.avg_summons_per_turn, 0::float8) as avg_summons_per_turn
+        coalesce(pta.avg_summons_per_turn, 0::float8) as avg_summons_per_turn,
+        ptp.most_played_pack
       from player_rollup pr
       left join player_turn_counts ptc on ptc.player_id = pr.player_id
       left join player_turn_avgs pta on pta.player_id = pr.player_id
+      left join player_top_pack ptp on ptp.player_id = pr.player_id
     )
     select
       j.player_id,
@@ -261,6 +281,7 @@ function buildGameSql(orderBy) {
       j.avg_rolls_per_turn,
       j.avg_gold_per_turn,
       j.avg_summons_per_turn,
+      j.most_played_pack,
       count(*) over()::int as total_players
     from joined j
     where j.games >= $11::int
@@ -289,6 +310,23 @@ function buildBattleSql(orderBy) {
       from turn_rows tr
       group by tr.spotlight_id
     ),
+    player_pack_counts as (
+      select
+        tr.spotlight_id as player_id,
+        tr.my_pack as pack,
+        count(*)::int as pack_rounds,
+        max(tr.created_at) as last_seen_at
+      from turn_rows tr
+      where tr.my_pack is not null
+      group by tr.spotlight_id, tr.my_pack
+    ),
+    player_top_pack as (
+      select distinct on (ppc.player_id)
+        ppc.player_id,
+        ppc.pack as most_played_pack
+      from player_pack_counts ppc
+      order by ppc.player_id, ppc.pack_rounds desc, ppc.last_seen_at desc, ppc.pack asc
+    ),
     joined as (
       select
         pr.player_id,
@@ -312,8 +350,10 @@ function buildBattleSql(orderBy) {
         end as drawrate,
         coalesce(pr.avg_rolls_per_turn, 0::float8) as avg_rolls_per_turn,
         coalesce(pr.avg_gold_per_turn, 0::float8) as avg_gold_per_turn,
-        coalesce(pr.avg_summons_per_turn, 0::float8) as avg_summons_per_turn
+        coalesce(pr.avg_summons_per_turn, 0::float8) as avg_summons_per_turn,
+        ptp.most_played_pack
       from player_rollup pr
+      left join player_top_pack ptp on ptp.player_id = pr.player_id
     )
     select
       j.player_id,
@@ -329,6 +369,7 @@ function buildBattleSql(orderBy) {
       j.avg_rolls_per_turn,
       j.avg_gold_per_turn,
       j.avg_summons_per_turn,
+      j.most_played_pack,
       count(*) over()::int as total_players
     from joined j
     where j.games >= $11::int
@@ -342,7 +383,10 @@ export async function GET(req) {
   const { searchParams } = new URL(req.url);
   const scope = (searchParams.get("scope") || "game").toLowerCase() === "battle" ? "battle" : "game";
   const search = searchParams.get("search")?.trim() || "";
-  const minMatches = parsePositiveInt(searchParams.get("minMatches"), 1);
+  const minMatches = Math.max(
+    MIN_MATCH_THRESHOLD,
+    parsePositiveInt(searchParams.get("minMatches"), MIN_MATCH_THRESHOLD)
+  );
   const pageSize = Math.min(MAX_PAGE_SIZE, parsePositiveInt(searchParams.get("pageSize"), DEFAULT_PAGE_SIZE));
   const page = parsePositiveInt(searchParams.get("page"), 1);
   const offset = (page - 1) * pageSize;
@@ -358,7 +402,7 @@ export async function GET(req) {
   const minTurn = scope === "battle" ? minTurnRaw : null;
   const maxTurn = scope === "battle" ? maxTurnRaw : null;
 
-  const sort = (searchParams.get("sort") || "games").toLowerCase();
+  const sort = (searchParams.get("sort") || "winrate").toLowerCase();
   const order = (searchParams.get("order") || "desc").toLowerCase() === "asc" ? "asc" : "desc";
   const orderBy = buildOrder(scope, sort, order);
 
@@ -401,7 +445,8 @@ export async function GET(req) {
         drawrate: Number(row.drawrate || 0),
         avgRollsPerTurn: Number(row.avg_rolls_per_turn || 0),
         avgGoldPerTurn: Number(row.avg_gold_per_turn || 0),
-        avgSummonsPerTurn: Number(row.avg_summons_per_turn || 0)
+        avgSummonsPerTurn: Number(row.avg_summons_per_turn || 0),
+        mostPlayedPack: row.most_played_pack || null
       }))
     },
     {

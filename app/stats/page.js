@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { getPackSprite } from "@/lib/packSprites";
+import { SemanticLabel } from "@/app/components/semantic-label";
 
 const BUILD_BACKGROUNDS = [
   "AboveCloudsBuild.png",
@@ -155,10 +157,15 @@ function parseCsvList(value) {
     .filter(Boolean);
 }
 
+function normalizeSortMetric(value) {
+  return value === "pickrate" ? "presence" : value;
+}
+
 const DEFAULT_STATS_FILTERS = {
   scope: "game",
   player: "",
   playerId: "",
+  version: "",
   pack: "",
   opponentPack: "",
   minTurn: "",
@@ -406,6 +413,7 @@ export default function StatsPage() {
     if (nextFilters.scope) params.set("scope", nextFilters.scope);
     if (nextFilters.player) params.set("player", nextFilters.player);
     if (nextFilters.playerId) params.set("playerId", nextFilters.playerId);
+    if (nextFilters.version) params.set("version", nextFilters.version);
     if (nextFilters.pack) params.set("pack", nextFilters.pack);
     if (nextFilters.opponentPack) params.set("opponentPack", nextFilters.opponentPack);
     if (nextFilters.minTurn) params.set("minTurn", nextFilters.minTurn);
@@ -476,6 +484,7 @@ export default function StatsPage() {
       scope: urlParams.get("scope") || "game",
       player: urlParams.get("player") || "",
       playerId: urlParams.get("playerId") || "",
+      version: urlParams.get("version") || "",
       pack: urlParams.get("pack") || "",
       opponentPack: urlParams.get("opponentPack") || "",
       minTurn: urlParams.get("minTurn") || "",
@@ -494,11 +503,11 @@ export default function StatsPage() {
     };
 
     const nextViewMode = urlParams.get("uiView") || "card";
-    const nextPetSort = urlParams.get("uiPetSort") || "buyWinrate";
+    const nextPetSort = normalizeSortMetric(urlParams.get("uiPetSort") || "buyWinrate");
     const nextPetOrder = urlParams.get("uiPetOrder") || "desc";
-    const nextPerkSort = urlParams.get("uiPerkSort") || "buyWinrate";
+    const nextPerkSort = normalizeSortMetric(urlParams.get("uiPerkSort") || "buyWinrate");
     const nextPerkOrder = urlParams.get("uiPerkOrder") || "desc";
-    const nextToySort = urlParams.get("uiToySort") || "buyWinrate";
+    const nextToySort = normalizeSortMetric(urlParams.get("uiToySort") || "buyWinrate");
     const nextToyOrder = urlParams.get("uiToyOrder") || "desc";
 
     setFilters(nextFilters);
@@ -537,17 +546,7 @@ export default function StatsPage() {
   const petSprite = (name) => petOptions.find((pet) => pet.name === name)?.sprite;
   const perkSprite = (name) => perkOptions.find((perk) => perk.name === name)?.sprite;
   const toySprite = (name) => toyOptions.find((toy) => toy.name === name)?.sprite;
-  const packSprite = (name) => {
-    const map = {
-      Turtle: "/Sprite/Pets/Turtle.png",
-      Puppy: "/Sprite/Pets/Puppy.png",
-      Star: "/Sprite/Pets/Starfish.png",
-      Golden: "/Sprite/Pets/GoldenRetriever.png",
-      Unicorn: "/Sprite/Pets/Unicorn.png",
-      Danger: "/Sprite/Pets/BlueWhale.png"
-    };
-    return map[name] || null;
-  };
+  const packSprite = (name) => getPackSprite(name);
   const packOrderMap = {
     Turtle: 0,
     Puppy: 1,
@@ -569,7 +568,7 @@ export default function StatsPage() {
     : [
         { value: "name", label: "Name" },
         { value: "buyCount", label: "Buy Count" },
-        { value: "pickrate", label: "Pickrate" },
+        { value: "presence", label: "Presence" },
         { value: "buyWinrate", label: "Winrate (Buy)" },
         { value: "buyLossrate", label: "Lossrate (Buy)" },
         { value: "endCount", label: "End Count" },
@@ -623,6 +622,7 @@ export default function StatsPage() {
           return gamesWith ? drawsWith / gamesWith : 0;
         case "buyCount":
           return gamesWith;
+        case "presence":
         case "pickrate":
           return games ? gamesWith / games : 0;
         case "buyWinrate":
@@ -666,6 +666,7 @@ export default function StatsPage() {
           return gamesWith ? drawsWith / gamesWith : 0;
         case "buyCount":
           return gamesWith;
+        case "presence":
         case "pickrate":
           return games ? gamesWith / games : 0;
         case "buyWinrate":
@@ -709,6 +710,7 @@ export default function StatsPage() {
           return gamesWith ? drawsWith / gamesWith : 0;
         case "buyCount":
           return gamesWith;
+        case "presence":
         case "pickrate":
           return games ? gamesWith / games : 0;
         case "buyWinrate":
@@ -750,17 +752,17 @@ export default function StatsPage() {
 
   return (
     <main onClick={() => setSortMenuOpen({ pet: false, perk: false, toy: false })}>
-      <div className="top-nav">
-        <Link href="/" className="nav-link">Explorer</Link>
-        <Link href="/stats" className="nav-link active">Stats</Link>
-        <Link href="/leaderboard" className="nav-link">Leaderboard</Link>
-      </div>
-
       <header className="hero">
         <div className="hero-copy">
           <h1>Stats Lab</h1>
           <p>Winrates by pack, pet buy rates, and end-board impact. Excludes Custom, Weekly, and Arena games.</p>
         </div>
+        <nav className="top-nav">
+          <Link href="/" className="nav-link">Explorer</Link>
+          <Link href="/stats" className="nav-link active">Stats</Link>
+          <Link href="/leaderboard" className="nav-link">Leaderboard</Link>
+          <Link href="/profile" className="nav-link">Profile</Link>
+        </nav>
       </header>
 
       <section className="section filters-section">
@@ -814,6 +816,14 @@ export default function StatsPage() {
               placeholder="Player UUID"
               value={filters.playerId}
               onChange={(e) => setFilters({ ...filters, playerId: e.target.value })}
+            />
+          </div>
+          <div className="field">
+            <label>Version</label>
+            <input
+              placeholder="e.g. 212.1,213.0"
+              value={filters.version}
+              onChange={(e) => setFilters({ ...filters, version: e.target.value })}
             />
           </div>
           <div className="field">
@@ -871,7 +881,9 @@ export default function StatsPage() {
           {filters.scope === "battle" && (
             <>
               <div className="field">
-                <label>Min Turn</label>
+                <label>
+                  <SemanticLabel type="turn">Min Turn</SemanticLabel>
+                </label>
                 <input
                   type="number"
                   min="1"
@@ -881,7 +893,9 @@ export default function StatsPage() {
                 />
               </div>
               <div className="field">
-                <label>Max Turn</label>
+                <label>
+                  <SemanticLabel type="turn">Max Turn</SemanticLabel>
+                </label>
                 <input
                   type="number"
                   min="1"
@@ -1043,9 +1057,9 @@ export default function StatsPage() {
                   <span>{filters.scope === "battle" ? "Rounds" : "Games"}: {games}</span>
                 </div>
                 <div className="stats-card-metrics">
-                  <div>Pickrate: {formatPct(totalPackEntries ? games / totalPackEntries : 0)}</div>
-                  <div>Winrate: {formatPct(games ? wins / games : 0)}</div>
-                  <div>Lossrate: {formatPct(games ? losses / games : 0)}</div>
+                  <div>Presence: {formatPct(totalPackEntries ? games / totalPackEntries : 0)}</div>
+                  <div className="rate-win">Winrate: {formatPct(games ? wins / games : 0)}</div>
+                  <div className="rate-loss">Lossrate: {formatPct(games ? losses / games : 0)}</div>
                   {filters.scope === "battle" ? (
                     <div>Drawrate: {formatPct(games ? draws / games : 0)}</div>
                   ) : null}
@@ -1100,8 +1114,8 @@ export default function StatsPage() {
                 <div className="field">
                   <label>Order</label>
                   <select value={petOrder} onChange={(e) => setPetOrder(e.target.value)}>
-                    <option value="asc">Asc</option>
-                    <option value="desc">Desc</option>
+                    <option value="asc">Ascending</option>
+                    <option value="desc">Descending</option>
                   </select>
                 </div>
               </div>
@@ -1131,8 +1145,8 @@ export default function StatsPage() {
                   <>
                     <div className="stats-card-meta">Rounds: {gamesWith}</div>
                     <div className="stats-card-metrics">
-                      <div>Winrate: {formatPct(gamesWith ? winsWith / gamesWith : 0)}</div>
-                      <div>Lossrate: {formatPct(gamesWith ? lossesWith / gamesWith : 0)}</div>
+                      <div className="rate-win">Winrate: {formatPct(gamesWith ? winsWith / gamesWith : 0)}</div>
+                      <div className="rate-loss">Lossrate: {formatPct(gamesWith ? lossesWith / gamesWith : 0)}</div>
                       <div>Drawrate: {formatPct(gamesWith ? drawsWith / gamesWith : 0)}</div>
                     </div>
                   </>
@@ -1140,13 +1154,13 @@ export default function StatsPage() {
                   <>
                     <div className="stats-card-meta">Buy: {gamesWith}</div>
                     <div className="stats-card-metrics">
-                      <div>Pickrate: {formatPct(games ? gamesWith / games : 0)}</div>
-                      <div>Winrate (Buy): {formatPct(gamesWith ? winsWith / gamesWith : 0)}</div>
-                      <div>Lossrate (Buy): {formatPct(gamesWith ? lossesWith / gamesWith : 0)}</div>
+                      <div>Presence: {formatPct(games ? gamesWith / games : 0)}</div>
+                      <div className="rate-win">Winrate (Buy): {formatPct(gamesWith ? winsWith / gamesWith : 0)}</div>
+                      <div className="rate-loss">Lossrate (Buy): {formatPct(gamesWith ? lossesWith / gamesWith : 0)}</div>
                       <div>End: {gamesEnd}</div>
                       <div>End Rate: {formatPct(games ? gamesEnd / games : 0)}</div>
-                      <div>Winrate (End): {formatPct(gamesEnd ? winsEnd / gamesEnd : 0)}</div>
-                      <div>Lossrate (End): {formatPct(gamesEnd ? lossesEnd / gamesEnd : 0)}</div>
+                      <div className="rate-win">Winrate (End): {formatPct(gamesEnd ? winsEnd / gamesEnd : 0)}</div>
+                      <div className="rate-loss">Lossrate (End): {formatPct(gamesEnd ? lossesEnd / gamesEnd : 0)}</div>
                     </div>
                   </>
                 )}
@@ -1200,8 +1214,8 @@ export default function StatsPage() {
                 <div className="field">
                   <label>Order</label>
                   <select value={perkOrder} onChange={(e) => setPerkOrder(e.target.value)}>
-                    <option value="asc">Asc</option>
-                    <option value="desc">Desc</option>
+                    <option value="asc">Ascending</option>
+                    <option value="desc">Descending</option>
                   </select>
                 </div>
               </div>
@@ -1231,8 +1245,8 @@ export default function StatsPage() {
                   <>
                     <div className="stats-card-meta">Rounds: {gamesWith}</div>
                     <div className="stats-card-metrics">
-                      <div>Winrate: {formatPct(gamesWith ? winsWith / gamesWith : 0)}</div>
-                      <div>Lossrate: {formatPct(gamesWith ? lossesWith / gamesWith : 0)}</div>
+                      <div className="rate-win">Winrate: {formatPct(gamesWith ? winsWith / gamesWith : 0)}</div>
+                      <div className="rate-loss">Lossrate: {formatPct(gamesWith ? lossesWith / gamesWith : 0)}</div>
                       <div>Drawrate: {formatPct(gamesWith ? drawsWith / gamesWith : 0)}</div>
                     </div>
                   </>
@@ -1240,13 +1254,13 @@ export default function StatsPage() {
                   <>
                     <div className="stats-card-meta">Buy: {gamesWith}</div>
                     <div className="stats-card-metrics">
-                      <div>Pickrate: {formatPct(games ? gamesWith / games : 0)}</div>
-                      <div>Winrate (Buy): {formatPct(gamesWith ? winsWith / gamesWith : 0)}</div>
-                      <div>Lossrate (Buy): {formatPct(gamesWith ? lossesWith / gamesWith : 0)}</div>
+                      <div>Presence: {formatPct(games ? gamesWith / games : 0)}</div>
+                      <div className="rate-win">Winrate (Buy): {formatPct(gamesWith ? winsWith / gamesWith : 0)}</div>
+                      <div className="rate-loss">Lossrate (Buy): {formatPct(gamesWith ? lossesWith / gamesWith : 0)}</div>
                       <div>End: {gamesEnd}</div>
                       <div>End Rate: {formatPct(games ? gamesEnd / games : 0)}</div>
-                      <div>Winrate (End): {formatPct(gamesEnd ? winsEnd / gamesEnd : 0)}</div>
-                      <div>Lossrate (End): {formatPct(gamesEnd ? lossesEnd / gamesEnd : 0)}</div>
+                      <div className="rate-win">Winrate (End): {formatPct(gamesEnd ? winsEnd / gamesEnd : 0)}</div>
+                      <div className="rate-loss">Lossrate (End): {formatPct(gamesEnd ? lossesEnd / gamesEnd : 0)}</div>
                     </div>
                   </>
                 )}
@@ -1300,8 +1314,8 @@ export default function StatsPage() {
                 <div className="field">
                   <label>Order</label>
                   <select value={toyOrder} onChange={(e) => setToyOrder(e.target.value)}>
-                    <option value="asc">Asc</option>
-                    <option value="desc">Desc</option>
+                    <option value="asc">Ascending</option>
+                    <option value="desc">Descending</option>
                   </select>
                 </div>
               </div>
@@ -1331,8 +1345,8 @@ export default function StatsPage() {
                   <>
                     <div className="stats-card-meta">Rounds: {gamesWith}</div>
                     <div className="stats-card-metrics">
-                      <div>Winrate: {formatPct(gamesWith ? winsWith / gamesWith : 0)}</div>
-                      <div>Lossrate: {formatPct(gamesWith ? lossesWith / gamesWith : 0)}</div>
+                      <div className="rate-win">Winrate: {formatPct(gamesWith ? winsWith / gamesWith : 0)}</div>
+                      <div className="rate-loss">Lossrate: {formatPct(gamesWith ? lossesWith / gamesWith : 0)}</div>
                       <div>Drawrate: {formatPct(gamesWith ? drawsWith / gamesWith : 0)}</div>
                     </div>
                   </>
@@ -1340,13 +1354,13 @@ export default function StatsPage() {
                   <>
                     <div className="stats-card-meta">Buy: {gamesWith}</div>
                     <div className="stats-card-metrics">
-                      <div>Pickrate: {formatPct(games ? gamesWith / games : 0)}</div>
-                      <div>Winrate (Buy): {formatPct(gamesWith ? winsWith / gamesWith : 0)}</div>
-                      <div>Lossrate (Buy): {formatPct(gamesWith ? lossesWith / gamesWith : 0)}</div>
+                      <div>Presence: {formatPct(games ? gamesWith / games : 0)}</div>
+                      <div className="rate-win">Winrate (Buy): {formatPct(gamesWith ? winsWith / gamesWith : 0)}</div>
+                      <div className="rate-loss">Lossrate (Buy): {formatPct(gamesWith ? lossesWith / gamesWith : 0)}</div>
                       <div>End: {gamesEnd}</div>
                       <div>End Rate: {formatPct(games ? gamesEnd / games : 0)}</div>
-                      <div>Winrate (End): {formatPct(gamesEnd ? winsEnd / gamesEnd : 0)}</div>
-                      <div>Lossrate (End): {formatPct(gamesEnd ? lossesEnd / gamesEnd : 0)}</div>
+                      <div className="rate-win">Winrate (End): {formatPct(gamesEnd ? winsEnd / gamesEnd : 0)}</div>
+                      <div className="rate-loss">Lossrate (End): {formatPct(gamesEnd ? lossesEnd / gamesEnd : 0)}</div>
                     </div>
                   </>
                 )}

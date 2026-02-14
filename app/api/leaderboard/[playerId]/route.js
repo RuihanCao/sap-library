@@ -226,7 +226,7 @@ function buildGameSql() {
         from pack_stats ps
       ), '[]'::json) as pack_stats,
       coalesce((
-        select json_agg(row_to_json(ms) order by ms.games desc, ms.pack asc, ms.opponent_pack asc)
+        select json_agg(row_to_json(ms) order by ms.winrate desc, ms.games desc, ms.pack asc, ms.opponent_pack asc)
         from matchup_stats ms
       ), '[]'::json) as matchup_stats,
       coalesce((
@@ -322,7 +322,7 @@ function buildBattleSql() {
         from pack_stats ps
       ), '[]'::json) as pack_stats,
       coalesce((
-        select json_agg(row_to_json(ms) order by ms.rounds desc, ms.pack asc, ms.opponent_pack asc)
+        select json_agg(row_to_json(ms) order by ms.winrate desc, ms.rounds desc, ms.pack asc, ms.opponent_pack asc)
         from matchup_stats ms
       ), '[]'::json) as matchup_stats,
       coalesce((

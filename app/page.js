@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { PackInlineName, PackMatchupInline } from "@/app/components/pack-inline";
 
 const BUILD_BACKGROUNDS = [
   "AboveCloudsBuild.png",
@@ -785,7 +786,6 @@ export default function Page() {
   }
 
   useEffect(() => {
-    if (exploreViewMode !== "list") return;
     const node = listSentinelRef.current;
     if (!node) return;
 
@@ -795,14 +795,14 @@ export default function Page() {
         if (!entry?.isIntersecting) return;
         if (searchLoading) return;
         if (results.length >= total) return;
-        runSearch(null, page + 1, { append: true, exploreViewValue: "list" });
+        runSearch(null, page + 1, { append: true });
       },
       { root: null, rootMargin: "240px 0px", threshold: 0.01 }
     );
 
     observer.observe(node);
     return () => observer.disconnect();
-  }, [exploreViewMode, results.length, total, page, searchLoading]);
+  }, [results.length, total, page, searchLoading]);
 
   function syncReplayParam(replayId) {
     const params = new URLSearchParams(window.location.search);
@@ -987,7 +987,6 @@ export default function Page() {
     return Number.isFinite(activeCount) && activeCount > 2;
   };
 
-  const totalPages = Math.max(1, Math.ceil(total / Number(filters.pageSize || 10)));
   const rawPct = bulkProgress.total > 0 ? (bulkProgress.done / bulkProgress.total) * 100 : 0;
   const pulseBoost = bulkProgress.active ? Math.min(0.9, progressPulse) : 0;
   const progressPct = Math.min(100, Math.floor(rawPct + pulseBoost));
@@ -998,6 +997,7 @@ export default function Page() {
         <Link href="/" className="nav-link active">Explorer</Link>
         <Link href="/stats" className="nav-link">Stats</Link>
         <Link href="/leaderboard" className="nav-link">Leaderboard</Link>
+        <Link href="/profile" className="nav-link">Profile</Link>
       </div>
       <header className="hero">
         <div className="hero-copy">
@@ -1499,6 +1499,10 @@ export default function Page() {
             const worldOpponent = isArena(r.match_type) || isMulti(r);
             const playerWon = Number(r.last_outcome) === 1;
             const opponentWon = Number(r.last_outcome) === 2;
+            const playerPackClass = playerWon ? "winner-pack" : opponentWon ? "loser-pack" : "";
+            const opponentPackClass = opponentWon ? "winner-pack" : playerWon ? "loser-pack" : "";
+            const playerMatchupClass = `pack-name-inline matchup-pack ${playerPackClass}`.trim();
+            const opponentMatchupClass = `pack-name-inline matchup-pack ${opponentPackClass}`.trim();
 
             return exploreViewMode === "list" ? (
               <div
@@ -1519,9 +1523,9 @@ export default function Page() {
 
                 <div className="list-matchup-col">
                   <div className="list-pack-line">
-                    <span className={`pack-pill ${playerWon ? "winner-pack" : ""}`}>{r.pack || "Unknown"}</span>
+                    <PackInlineName name={r.pack} className={`pack-pill ${playerPackClass}`.trim()} />
                     <span className="vs-line">vs</span>
-                    <span className={`pack-pill ${opponentWon ? "winner-pack" : ""}`}>{r.opponent_pack || "Unknown"}</span>
+                    <PackInlineName name={r.opponent_pack} className={`pack-pill ${opponentPackClass}`.trim()} />
                   </div>
                   <div className="list-matchup-sub">{(r.match_type || "unknown").toUpperCase()}</div>
                 </div>
@@ -1580,7 +1584,15 @@ export default function Page() {
                     </span>
                   </div>
                 </div>
-                <div className="muted">Matchup: {r.pack || "Unknown"} vs {r.opponent_pack || "Unknown"}</div>
+                <div className="muted matchup-line">
+                  <span>Matchup:</span>
+                  <PackMatchupInline
+                    pack={r.pack}
+                    opponentPack={r.opponent_pack}
+                    leftClassName={playerMatchupClass}
+                    rightClassName={opponentMatchupClass}
+                  />
+                </div>
                 <div className="replay-image-wrap">
                   <img
                     className="replay-image"
@@ -1594,19 +1606,11 @@ export default function Page() {
             );
           })}
         </div>
-        {exploreViewMode === "list" ? (
-          <div className="infinite-footer">
-            <div className="page-info">{results.length} / {total}</div>
-            <div ref={listSentinelRef} className="list-sentinel" />
-            {searchLoading && results.length < total ? <div className="muted">Loading more...</div> : null}
-          </div>
-        ) : (
-          <div className="pagination">
-            <button disabled={page <= 1 || searchLoading} onClick={() => runSearch(null, page - 1)}>Prev</button>
-            <div className="page-info">Page {page} / {totalPages}</div>
-            <button disabled={page >= totalPages || searchLoading} onClick={() => runSearch(null, page + 1)}>Next</button>
-          </div>
-        )}
+        <div className="infinite-footer">
+          <div className="page-info">{results.length} / {total}</div>
+          <div ref={listSentinelRef} className="list-sentinel" />
+          {searchLoading && results.length < total ? <div className="muted">Loading more...</div> : null}
+        </div>
       </section>
 
       {modalOpen && (
@@ -1626,7 +1630,15 @@ export default function Page() {
             {!modalLoading && modalData?.replay && (
               <>
                 <div className="modal-grid">
-                  <div><span className="label">Matchup</span><span>{modalData.replay.pack || "Unknown"} vs {modalData.replay.opponent_pack || "Unknown"}</span></div>
+                  <div>
+                    <span className="label">Matchup</span>
+                    <span>
+                      <PackMatchupInline
+                        pack={modalData.replay.pack}
+                        opponentPack={modalData.replay.opponent_pack}
+                      />
+                    </span>
+                  </div>
                   <div><span className="label">Game Type</span><span>{(modalData.replay.match_type || "unknown").toUpperCase()}</span></div>
                   <div><span className="label">Version</span><span>{modalData.replay.game_version || "?"}</span></div>
                   <div><span className="label">Participation</span><span>{modalData.replay.participation_id}</span></div>

@@ -40,6 +40,7 @@ export async function GET(req) {
   const opponentToy = parseList(searchParams.get("opponentToy"));
   const scope = searchParams.get("scope") || "game";
   const tags = parseList(searchParams.get("tags"));
+  const versions = parseList(searchParams.get("version"));
 
   const values = [];
   let playerNameIndex = null;
@@ -82,6 +83,10 @@ export async function GET(req) {
   if (tags.length) {
     values.push(tags);
     clauses.push(`coalesce(r.tags, '{}'::text[]) && $${values.length}`);
+  }
+  if (versions.length) {
+    values.push(versions);
+    clauses.push(`r.game_version = any($${values.length})`);
   }
 
   const petClause = pet.length ? "and p.pet_name = any($PET)" : "";

@@ -27,7 +27,15 @@ export async function GET(req) {
   const excludeA = searchParams.get("excludeA");
   const excludeB = searchParams.get("excludeB");
   const mirrorMatch = searchParams.get("mirrorMatch") === "true";
-  const matchType = (searchParams.get("matchType") || "").toLowerCase();
+  const matchTypeList = Array.from(
+    new Set(
+      searchParams
+        .getAll("matchType")
+        .flatMap((value) => parseList(value))
+        .map((value) => value.toLowerCase())
+        .filter(Boolean)
+    )
+  );
   const tagList = parseList(searchParams.get("tags"));
 
   const petList = parseList(searchParams.get("pet"));
@@ -140,9 +148,9 @@ export async function GET(req) {
     clauses.push(`r.pack is not null and r.pack = r.opponent_pack`);
   }
 
-  if (matchType && matchType !== "any") {
-    values.push(matchType);
-    clauses.push(`r.match_type = $${values.length}`);
+  if (matchTypeList.length && !matchTypeList.includes("any")) {
+    values.push(matchTypeList);
+    clauses.push(`coalesce(nullif(lower(r.match_type), ''), 'unknown') = any($${values.length})`);
   }
 
   if (tagList.length) {
