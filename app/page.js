@@ -1088,10 +1088,22 @@ export default function Page() {
         <div className="toggles">
           <button type="button" className={enabled.player ? "toggle active" : "toggle"} onClick={() => toggleFilter("player")}>Player</button>
           <button type="button" className={enabled.matchup ? "toggle active" : "toggle"} onClick={() => toggleFilter("matchup")}>Pack Matchup</button>
-          <button type="button" className={enabled.pets ? "toggle active" : "toggle"} onClick={() => toggleFilter("pets")}>Pets</button>
-          <button type="button" className={enabled.perks ? "toggle active" : "toggle"} onClick={() => toggleFilter("perks")}>Perks</button>
-          <button type="button" className={enabled.toys ? "toggle active" : "toggle"} onClick={() => toggleFilter("toys")}>Toys</button>
-          <button type="button" className={enabled.turn ? "toggle active" : "toggle"} onClick={() => toggleFilter("turn")}>Turn</button>
+          <button type="button" className={enabled.pets ? "toggle with-icon active" : "toggle with-icon"} onClick={() => toggleFilter("pets")}>
+            <img className="toggle-icon" src="/Sprite/Pets/Turtle.png" alt="" />
+            Pets
+          </button>
+          <button type="button" className={enabled.perks ? "toggle with-icon active" : "toggle with-icon"} onClick={() => toggleFilter("perks")}>
+            <img className="toggle-icon" src="/Sprite/Food/Honey.png" alt="" />
+            Perks
+          </button>
+          <button type="button" className={enabled.toys ? "toggle with-icon active" : "toggle with-icon"} onClick={() => toggleFilter("toys")}>
+            <img className="toggle-icon" src="/Sprite/Toys/RelicFoamSword.png" alt="" />
+            Toys
+          </button>
+          <button type="button" className={enabled.turn ? "toggle with-icon active" : "toggle with-icon"} onClick={() => toggleFilter("turn")}>
+            <img className="toggle-icon" src="/hourglass-twemoji.png" alt="" />
+            Turn
+          </button>
           <button type="button" className={enabled.matchType ? "toggle active" : "toggle"} onClick={() => toggleFilter("matchType")}>Game Type</button>
           <button
             type="button"
