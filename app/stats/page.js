@@ -148,6 +148,7 @@ const THEMES = {
 };
 
 const EXCLUDED_PACKS = ["Custom", "Weekly"];
+const defaultSortForScope = (scope) => (scope === "battle" ? "winrate" : "pickrate");
 
 function parseCsvList(value) {
   if (!value) return [];
@@ -355,11 +356,11 @@ export default function StatsPage() {
     toyStats: []
   });
   const [loading, setLoading] = useState(false);
-  const [petSort, setPetSort] = useState("buyWinrate");
+  const [petSort, setPetSort] = useState(defaultSortForScope(DEFAULT_STATS_FILTERS.scope));
   const [petOrder, setPetOrder] = useState("desc");
-  const [perkSort, setPerkSort] = useState("buyWinrate");
+  const [perkSort, setPerkSort] = useState(defaultSortForScope(DEFAULT_STATS_FILTERS.scope));
   const [perkOrder, setPerkOrder] = useState("desc");
-  const [toySort, setToySort] = useState("buyWinrate");
+  const [toySort, setToySort] = useState(defaultSortForScope(DEFAULT_STATS_FILTERS.scope));
   const [toyOrder, setToyOrder] = useState("desc");
   const [viewMode, setViewMode] = useState("card");
   const [sortMenuOpen, setSortMenuOpen] = useState({
@@ -431,11 +432,11 @@ export default function StatsPage() {
     if (nextFilters.tags) params.set("tags", nextFilters.tags);
 
     params.set("uiView", uiState.viewModeValue || "card");
-    params.set("uiPetSort", uiState.petSortValue || "buyWinrate");
+    params.set("uiPetSort", uiState.petSortValue || defaultSortForScope(nextFilters.scope));
     params.set("uiPetOrder", uiState.petOrderValue || "desc");
-    params.set("uiPerkSort", uiState.perkSortValue || "buyWinrate");
+    params.set("uiPerkSort", uiState.perkSortValue || defaultSortForScope(nextFilters.scope));
     params.set("uiPerkOrder", uiState.perkOrderValue || "desc");
-    params.set("uiToySort", uiState.toySortValue || "buyWinrate");
+    params.set("uiToySort", uiState.toySortValue || defaultSortForScope(nextFilters.scope));
     params.set("uiToyOrder", uiState.toyOrderValue || "desc");
 
     return params;
@@ -503,11 +504,11 @@ export default function StatsPage() {
     };
 
     const nextViewMode = urlParams.get("uiView") || "card";
-    const nextPetSort = normalizeSortMetric(urlParams.get("uiPetSort") || "buyWinrate");
+    const nextPetSort = normalizeSortMetric(urlParams.get("uiPetSort") || defaultSortForScope(nextFilters.scope));
     const nextPetOrder = urlParams.get("uiPetOrder") || "desc";
-    const nextPerkSort = normalizeSortMetric(urlParams.get("uiPerkSort") || "buyWinrate");
+    const nextPerkSort = normalizeSortMetric(urlParams.get("uiPerkSort") || defaultSortForScope(nextFilters.scope));
     const nextPerkOrder = urlParams.get("uiPerkOrder") || "desc";
-    const nextToySort = normalizeSortMetric(urlParams.get("uiToySort") || "buyWinrate");
+    const nextToySort = normalizeSortMetric(urlParams.get("uiToySort") || defaultSortForScope(nextFilters.scope));
     const nextToyOrder = urlParams.get("uiToyOrder") || "desc";
 
     setFilters(nextFilters);
@@ -776,20 +777,20 @@ export default function StatsPage() {
               onClick={() => {
                 const reset = { ...DEFAULT_STATS_FILTERS };
                 setFilters(reset);
-                setPetSort("buyWinrate");
+                setPetSort(defaultSortForScope(reset.scope));
                 setPetOrder("desc");
-                setPerkSort("buyWinrate");
+                setPerkSort(defaultSortForScope(reset.scope));
                 setPerkOrder("desc");
-                setToySort("buyWinrate");
+                setToySort(defaultSortForScope(reset.scope));
                 setToyOrder("desc");
                 loadStats(reset, {
                   uiState: {
                     viewModeValue: viewMode,
-                    petSortValue: "buyWinrate",
+                    petSortValue: defaultSortForScope(reset.scope),
                     petOrderValue: "desc",
-                    perkSortValue: "buyWinrate",
+                    perkSortValue: defaultSortForScope(reset.scope),
                     perkOrderValue: "desc",
-                    toySortValue: "buyWinrate",
+                    toySortValue: defaultSortForScope(reset.scope),
                     toyOrderValue: "desc"
                   }
                 });
@@ -833,9 +834,9 @@ export default function StatsPage() {
               onChange={(e) => {
                 const nextScope = e.target.value;
                 const next = { ...filters, scope: nextScope };
-                const nextPetSort = nextScope === "battle" ? "winrate" : "buyWinrate";
-                const nextPerkSort = nextScope === "battle" ? "winrate" : "buyWinrate";
-                const nextToySort = nextScope === "battle" ? "winrate" : "buyWinrate";
+                const nextPetSort = defaultSortForScope(nextScope);
+                const nextPerkSort = defaultSortForScope(nextScope);
+                const nextToySort = defaultSortForScope(nextScope);
                 setFilters(next);
                 setPetSort(nextPetSort);
                 setPerkSort(nextPerkSort);
