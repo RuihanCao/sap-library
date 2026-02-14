@@ -5,6 +5,13 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const EXCLUDED_PACKS = ["Custom", "Weekly"];
+const STATS_CACHE_TTL_MS = 30_000;
+const STATS_CACHE_MAX_KEYS = 200;
+const globalForStatsCache = globalThis;
+const statsResponseCache = globalForStatsCache.__sapStatsCache || new Map();
+if (!globalForStatsCache.__sapStatsCache) {
+  globalForStatsCache.__sapStatsCache = statsResponseCache;
+}
 
 function parseList(value) {
   if (!value) return [];
@@ -15,6 +22,17 @@ function parseList(value) {
 }
 
 export async function GET(req) {
+  const cacheKey = req.url;
+  const cacheHit = statsResponseCache.get(cacheKey);
+  if (cacheHit && Date.now() - cacheHit.timestamp < STATS_CACHE_TTL_MS) {
+    return NextResponse.json(cacheHit.payload, {
+      headers: {
+        "Cache-Control": "public, max-age=60, s-maxage=120, stale-while-revalidate=300",
+        "X-Stats-Cache": "HIT"
+      }
+    });
+  }
+
   const { searchParams } = new URL(req.url);
   const pack = searchParams.get("pack") || "";
   const opponentPack = searchParams.get("opponentPack") || "";
@@ -388,73 +406,148 @@ export async function GET(req) {
       select distinct toy_name from combined_toy_any
       union
       select distinct toy_name from combined_toy_end
+    ),
+    pack_stats_agg as (
+      select
+        cp.pack as pack,
+        count(*)::int as games,
+        sum(case
+          when cp.side = 'player' and cp.outcome = 1 then 1
+          when cp.side = 'opponent' and cp.outcome = 2 then 1
+          else 0
+        end)::int as wins,
+        sum((cp.outcome = 3)::int)::int as draws
+      from combined_pack cp
+      group by cp.pack
+    ),
+    pet_any_agg as (
+      select
+        pa.pet_name,
+        count(*)::int as games_with,
+        sum(case
+          when pa.side = 'player' and o.outcome = 1 then 1
+          when pa.side = 'opponent' and o.outcome = 2 then 1
+          else 0
+        end)::int as wins_with,
+        sum((o.outcome = 3)::int)::int as draws_with
+      from combined_pet_any pa
+      join outcomes o on o.replay_id = pa.id
+      group by pa.pet_name
+    ),
+    pet_end_agg as (
+      select
+        pe.pet_name,
+        count(*)::int as games_end,
+        sum(case
+          when pe.side = 'player' and o.outcome = 1 then 1
+          when pe.side = 'opponent' and o.outcome = 2 then 1
+          else 0
+        end)::int as wins_end,
+        sum((o.outcome = 3)::int)::int as draws_end
+      from combined_pet_end pe
+      join outcomes o on o.replay_id = pe.id
+      group by pe.pet_name
+    ),
+    pet_stats_agg as (
+      select
+        coalesce(pa.pet_name, pe.pet_name) as pet_name,
+        coalesce(pa.games_with, 0)::int as games_with,
+        coalesce(pa.wins_with, 0)::int as wins_with,
+        coalesce(pa.draws_with, 0)::int as draws_with,
+        coalesce(pe.games_end, 0)::int as games_end,
+        coalesce(pe.wins_end, 0)::int as wins_end,
+        coalesce(pe.draws_end, 0)::int as draws_end
+      from pet_any_agg pa
+      full outer join pet_end_agg pe on pe.pet_name = pa.pet_name
+    ),
+    perk_any_agg as (
+      select
+        pa.perk_name,
+        count(*)::int as games_with,
+        sum(case
+          when pa.side = 'player' and o.outcome = 1 then 1
+          when pa.side = 'opponent' and o.outcome = 2 then 1
+          else 0
+        end)::int as wins_with,
+        sum((o.outcome = 3)::int)::int as draws_with
+      from combined_perk_any pa
+      join outcomes o on o.replay_id = pa.id
+      group by pa.perk_name
+    ),
+    perk_end_agg as (
+      select
+        pe.perk_name,
+        count(*)::int as games_end,
+        sum(case
+          when pe.side = 'player' and o.outcome = 1 then 1
+          when pe.side = 'opponent' and o.outcome = 2 then 1
+          else 0
+        end)::int as wins_end,
+        sum((o.outcome = 3)::int)::int as draws_end
+      from combined_perk_end pe
+      join outcomes o on o.replay_id = pe.id
+      group by pe.perk_name
+    ),
+    perk_stats_agg as (
+      select
+        coalesce(pa.perk_name, pe.perk_name) as perk_name,
+        coalesce(pa.games_with, 0)::int as games_with,
+        coalesce(pa.wins_with, 0)::int as wins_with,
+        coalesce(pa.draws_with, 0)::int as draws_with,
+        coalesce(pe.games_end, 0)::int as games_end,
+        coalesce(pe.wins_end, 0)::int as wins_end,
+        coalesce(pe.draws_end, 0)::int as draws_end
+      from perk_any_agg pa
+      full outer join perk_end_agg pe on pe.perk_name = pa.perk_name
+    ),
+    toy_any_agg as (
+      select
+        ta.toy_name,
+        count(*)::int as games_with,
+        sum(case
+          when ta.side = 'player' and o.outcome = 1 then 1
+          when ta.side = 'opponent' and o.outcome = 2 then 1
+          else 0
+        end)::int as wins_with,
+        sum((o.outcome = 3)::int)::int as draws_with
+      from combined_toy_any ta
+      join outcomes o on o.replay_id = ta.id
+      group by ta.toy_name
+    ),
+    toy_end_agg as (
+      select
+        te.toy_name,
+        count(*)::int as games_end,
+        sum(case
+          when te.side = 'player' and o.outcome = 1 then 1
+          when te.side = 'opponent' and o.outcome = 2 then 1
+          else 0
+        end)::int as wins_end,
+        sum((o.outcome = 3)::int)::int as draws_end
+      from combined_toy_end te
+      join outcomes o on o.replay_id = te.id
+      group by te.toy_name
+    ),
+    toy_stats_agg as (
+      select
+        coalesce(ta.toy_name, te.toy_name) as toy_name,
+        coalesce(ta.games_with, 0)::int as games_with,
+        coalesce(ta.wins_with, 0)::int as wins_with,
+        coalesce(ta.draws_with, 0)::int as draws_with,
+        coalesce(te.games_end, 0)::int as games_end,
+        coalesce(te.wins_end, 0)::int as wins_end,
+        coalesce(te.draws_end, 0)::int as draws_end
+      from toy_any_agg ta
+      full outer join toy_end_agg te on te.toy_name = ta.toy_name
     )
     select
       (select count(*) from base) as total_games,
       (select count(*) from turns t join base b on b.id = t.replay_id) as total_battles,
       (select max(created_at) from base) as newest_entry_at,
-      (select coalesce(json_agg(row_to_json(cps)), '[]'::json) from (
-        select
-          cp.pack as pack,
-          count(*)::int as games,
-          sum(case
-            when cp.side = 'player' and cp.outcome = 1 then 1
-            when cp.side = 'opponent' and cp.outcome = 2 then 1
-            else 0
-          end)::int as wins,
-          sum(case when cp.outcome = 3 then 1 else 0 end)::int as draws
-        from combined_pack cp
-        group by cp.pack
-        order by cp.pack
-      ) cps) as pack_stats,
-      (select coalesce(json_agg(row_to_json(pet_stats)), '[]'::json) from (
-        select
-          pl.pet_name as pet_name,
-          (select count(*) from combined_pet_any pa where pa.pet_name = pl.pet_name)::int as games_with,
-          (select count(*) from combined_pet_any pa join outcomes o on o.replay_id = pa.id where pa.pet_name = pl.pet_name and (
-            (pa.side = 'player' and o.outcome = 1) or (pa.side = 'opponent' and o.outcome = 2)
-          ))::int as wins_with,
-          (select count(*) from combined_pet_any pa join outcomes o on o.replay_id = pa.id where pa.pet_name = pl.pet_name and o.outcome = 3)::int as draws_with,
-          (select count(*) from combined_pet_end pe where pe.pet_name = pl.pet_name)::int as games_end,
-          (select count(*) from combined_pet_end pe join outcomes o on o.replay_id = pe.id where pe.pet_name = pl.pet_name and (
-            (pe.side = 'player' and o.outcome = 1) or (pe.side = 'opponent' and o.outcome = 2)
-          ))::int as wins_end,
-          (select count(*) from combined_pet_end pe join outcomes o on o.replay_id = pe.id where pe.pet_name = pl.pet_name and o.outcome = 3)::int as draws_end
-        from combined_pet_list pl
-        order by (select count(*) from combined_pet_any pa where pa.pet_name = pl.pet_name) desc, pl.pet_name asc
-      ) pet_stats) as pet_stats,
-      (select coalesce(json_agg(row_to_json(perk_stats)), '[]'::json) from (
-        select
-          pl.perk_name as perk_name,
-          (select count(*) from combined_perk_any pa where pa.perk_name = pl.perk_name)::int as games_with,
-          (select count(*) from combined_perk_any pa join outcomes o on o.replay_id = pa.id where pa.perk_name = pl.perk_name and (
-            (pa.side = 'player' and o.outcome = 1) or (pa.side = 'opponent' and o.outcome = 2)
-          ))::int as wins_with,
-          (select count(*) from combined_perk_any pa join outcomes o on o.replay_id = pa.id where pa.perk_name = pl.perk_name and o.outcome = 3)::int as draws_with,
-          (select count(*) from combined_perk_end pe where pe.perk_name = pl.perk_name)::int as games_end,
-          (select count(*) from combined_perk_end pe join outcomes o on o.replay_id = pe.id where pe.perk_name = pl.perk_name and (
-            (pe.side = 'player' and o.outcome = 1) or (pe.side = 'opponent' and o.outcome = 2)
-          ))::int as wins_end,
-          (select count(*) from combined_perk_end pe join outcomes o on o.replay_id = pe.id where pe.perk_name = pl.perk_name and o.outcome = 3)::int as draws_end
-        from combined_perk_list pl
-        order by (select count(*) from combined_perk_any pa where pa.perk_name = pl.perk_name) desc, pl.perk_name asc
-      ) perk_stats) as perk_stats,
-      (select coalesce(json_agg(row_to_json(toy_stats)), '[]'::json) from (
-        select
-          tl.toy_name as toy_name,
-          (select count(*) from combined_toy_any ta where ta.toy_name = tl.toy_name)::int as games_with,
-          (select count(*) from combined_toy_any ta join outcomes o on o.replay_id = ta.id where ta.toy_name = tl.toy_name and (
-            (ta.side = 'player' and o.outcome = 1) or (ta.side = 'opponent' and o.outcome = 2)
-          ))::int as wins_with,
-          (select count(*) from combined_toy_any ta join outcomes o on o.replay_id = ta.id where ta.toy_name = tl.toy_name and o.outcome = 3)::int as draws_with,
-          (select count(*) from combined_toy_end te where te.toy_name = tl.toy_name)::int as games_end,
-          (select count(*) from combined_toy_end te join outcomes o on o.replay_id = te.id where te.toy_name = tl.toy_name and (
-            (te.side = 'player' and o.outcome = 1) or (te.side = 'opponent' and o.outcome = 2)
-          ))::int as wins_end,
-          (select count(*) from combined_toy_end te join outcomes o on o.replay_id = te.id where te.toy_name = tl.toy_name and o.outcome = 3)::int as draws_end
-        from combined_toy_list tl
-        order by (select count(*) from combined_toy_any ta where ta.toy_name = tl.toy_name) desc, tl.toy_name asc
-      ) toy_stats) as toy_stats
+      (select coalesce(json_agg(row_to_json(ps) order by ps.pack), '[]'::json) from pack_stats_agg ps) as pack_stats,
+      (select coalesce(json_agg(row_to_json(ps) order by ps.games_with desc, ps.pet_name asc), '[]'::json) from pet_stats_agg ps) as pet_stats,
+      (select coalesce(json_agg(row_to_json(ps) order by ps.games_with desc, ps.perk_name asc), '[]'::json) from perk_stats_agg ps) as perk_stats,
+      (select coalesce(json_agg(row_to_json(ts) order by ts.games_with desc, ts.toy_name asc), '[]'::json) from toy_stats_agg ts) as toy_stats
   `;
 
   const battleSql = `
@@ -666,21 +759,27 @@ export async function GET(req) {
   const { rows } = await pool.query(sql, finalValues);
   const row = rows[0] || { total_games: 0, pack_stats: [], pet_stats: [] };
 
-  return NextResponse.json(
-    {
-      totalGames: Number(row.total_games || 0),
-      totalBattles: Number(row.total_battles || 0),
-      generatedAt: new Date().toISOString(),
-      newestEntryAt: row.newest_entry_at || null,
-      packStats: row.pack_stats || [],
-      petStats: row.pet_stats || [],
-      perkStats: row.perk_stats || [],
-      toyStats: row.toy_stats || []
-    },
-    {
-      headers: {
-        "Cache-Control": "public, max-age=60, s-maxage=120, stale-while-revalidate=300"
-      }
+  const payload = {
+    totalGames: Number(row.total_games || 0),
+    totalBattles: Number(row.total_battles || 0),
+    generatedAt: new Date().toISOString(),
+    newestEntryAt: row.newest_entry_at || null,
+    packStats: row.pack_stats || [],
+    petStats: row.pet_stats || [],
+    perkStats: row.perk_stats || [],
+    toyStats: row.toy_stats || []
+  };
+
+  if (statsResponseCache.size >= STATS_CACHE_MAX_KEYS) {
+    const oldestKey = statsResponseCache.keys().next().value;
+    if (oldestKey) statsResponseCache.delete(oldestKey);
+  }
+  statsResponseCache.set(cacheKey, { timestamp: Date.now(), payload });
+
+  return NextResponse.json(payload, {
+    headers: {
+      "Cache-Control": "public, max-age=60, s-maxage=120, stale-while-revalidate=300",
+      "X-Stats-Cache": "MISS"
     }
-  );
+  });
 }
