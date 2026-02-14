@@ -1,4 +1,6 @@
-﻿import { NextResponse } from "next/server";
+import { NextResponse } from "next/server";
+import { pool } from "@/lib/db";
+import { getAvailableVersions, getCurrentVersion } from "@/lib/versionFilter";
 const { PETS, PERKS, TOYS } = require("@/lib/data");
 const { PACK_MAP } = require("@/lib/config");
 
@@ -63,8 +65,18 @@ export async function GET() {
     }))
     .sort((a, b) => Number(a.id) - Number(b.id));
 
+  let versions = [];
+  let currentVersion = null;
+  try {
+    versions = await getAvailableVersions(pool);
+    currentVersion = await getCurrentVersion(pool);
+  } catch {
+    versions = [];
+    currentVersion = null;
+  }
+
   return NextResponse.json(
-    { pets, perks, toys, packs },
+    { pets, perks, toys, packs, versions, currentVersion },
     {
       headers: {
         "Cache-Control": "public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800"

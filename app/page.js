@@ -279,6 +279,7 @@ const DEFAULT_FILTERS = {
   player: "",
   playerId: "",
   opponent: "",
+  version: "current",
   minRank: "",
   minRankMode: "any",
   packA: "",
@@ -338,7 +339,7 @@ export default function Page() {
     active: false
   });
   const [progressPulse, setProgressPulse] = useState(0);
-  const [meta, setMeta] = useState({ pets: [], perks: [], toys: [], packs: [] });
+  const [meta, setMeta] = useState({ pets: [], perks: [], toys: [], packs: [], versions: [], currentVersion: null });
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
   const [enabled, setEnabled] = useState(DEFAULT_ENABLED);
   const [advancedEnabled, setAdvancedEnabled] = useState(false);
@@ -377,8 +378,17 @@ export default function Page() {
   useEffect(() => {
     fetch("/api/meta")
       .then((res) => res.json())
-      .then((data) => setMeta(data))
-      .catch(() => setMeta({ pets: [], perks: [], toys: [], packs: [] }));
+      .then((data) =>
+        setMeta({
+          pets: data.pets || [],
+          perks: data.perks || [],
+          toys: data.toys || [],
+          packs: data.packs || [],
+          versions: data.versions || [],
+          currentVersion: data.currentVersion || null
+        })
+      )
+      .catch(() => setMeta({ pets: [], perks: [], toys: [], packs: [], versions: [], currentVersion: null }));
   }, []);
 
   useEffect(() => {
@@ -445,6 +455,9 @@ export default function Page() {
     if (enabledValue.turn && filtersValue.turn) params.set("turn", filtersValue.turn);
     if (enabledValue.matchType && filtersValue.matchType && filtersValue.matchType !== "any") {
       params.set("matchType", filtersValue.matchType);
+    }
+    if (filtersValue.version) {
+      params.set("version", filtersValue.version);
     }
 
     if (advancedEnabledValue) {
@@ -518,6 +531,7 @@ export default function Page() {
     assignText("perkMode");
     assignText("toyMode");
     assignText("matchType");
+    assignText("version");
     assignText("petLevelName");
     assignText("petLevelMin");
     assignText("exactTeam");
@@ -1265,6 +1279,24 @@ export default function Page() {
                 </select>
               </div>
             )}
+            <div className="field">
+              <label>Version</label>
+              <select
+                value={filters.version}
+                onChange={(e) => setFilters({ ...filters, version: e.target.value })}
+              >
+                <option value="current">
+                  Current
+                  {meta.currentVersion ? ` (${meta.currentVersion})` : ""}
+                </option>
+                <option value="all">All Versions</option>
+                {(meta.versions || []).map((version) => (
+                  <option key={version} value={version}>
+                    {version}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {advancedEnabled && (

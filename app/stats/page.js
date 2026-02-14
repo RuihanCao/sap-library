@@ -166,7 +166,7 @@ const DEFAULT_STATS_FILTERS = {
   scope: "game",
   player: "",
   playerId: "",
-  version: "",
+  version: "current",
   pack: "",
   opponentPack: "",
   minTurn: "",
@@ -343,7 +343,14 @@ function IconMultiSelect({ label, options, selected, onChange, placeholder }) {
 }
 
 export default function StatsPage() {
-  const [meta, setMeta] = useState({ pets: [], perks: [], toys: [], packs: [] });
+  const [meta, setMeta] = useState({
+    pets: [],
+    perks: [],
+    toys: [],
+    packs: [],
+    versions: [],
+    currentVersion: null
+  });
   const [filters, setFilters] = useState(DEFAULT_STATS_FILTERS);
   const [stats, setStats] = useState({
     totalGames: 0,
@@ -388,9 +395,20 @@ export default function StatsPage() {
         pets: data.pets || [],
         perks: data.perks || [],
         toys: data.toys || [],
-        packs: data.packs || []
+        packs: data.packs || [],
+        versions: data.versions || [],
+        currentVersion: data.currentVersion || null
       }))
-      .catch(() => setMeta({ pets: [], perks: [], toys: [], packs: [] }));
+      .catch(() =>
+        setMeta({
+          pets: [],
+          perks: [],
+          toys: [],
+          packs: [],
+          versions: [],
+          currentVersion: null
+        })
+      );
   }, []);
 
   const packOptions = useMemo(() => meta.packs.filter((pack) => !EXCLUDED_PACKS.includes(pack.name)), [meta.packs]);
@@ -485,7 +503,7 @@ export default function StatsPage() {
       scope: urlParams.get("scope") || "game",
       player: urlParams.get("player") || "",
       playerId: urlParams.get("playerId") || "",
-      version: urlParams.get("version") || "",
+      version: urlParams.get("version") || "current",
       pack: urlParams.get("pack") || "",
       opponentPack: urlParams.get("opponentPack") || "",
       minTurn: urlParams.get("minTurn") || "",
@@ -821,11 +839,21 @@ export default function StatsPage() {
           </div>
           <div className="field">
             <label>Version</label>
-            <input
-              placeholder="e.g. 212.1,213.0"
+            <select
               value={filters.version}
               onChange={(e) => setFilters({ ...filters, version: e.target.value })}
-            />
+            >
+              <option value="current">
+                Current
+                {meta.currentVersion ? ` (${meta.currentVersion})` : ""}
+              </option>
+              <option value="all">All Versions</option>
+              {(meta.versions || []).map((version) => (
+                <option key={version} value={version}>
+                  {version}
+                </option>
+              ))}
+            </select>
           </div>
           <div className="field">
             <label>Scope</label>

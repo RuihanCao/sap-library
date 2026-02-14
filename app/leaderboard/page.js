@@ -112,6 +112,7 @@ const DEFAULT_FILTERS = {
   scope: "game",
   search: "",
   minMatches: String(MIN_MATCH_THRESHOLD),
+  version: "current",
   pack: "",
   opponentPack: "",
   pet: [],
@@ -234,7 +235,14 @@ function IconMultiSelect({ label, options, selected, onChange, placeholder }) {
 }
 
 export default function LeaderboardPage() {
-  const [meta, setMeta] = useState({ pets: [], perks: [], toys: [], packs: [] });
+  const [meta, setMeta] = useState({
+    pets: [],
+    perks: [],
+    toys: [],
+    packs: [],
+    versions: [],
+    currentVersion: null
+  });
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -272,9 +280,20 @@ export default function LeaderboardPage() {
         pets: data.pets || [],
         perks: data.perks || [],
         toys: data.toys || [],
-        packs: data.packs || []
+        packs: data.packs || [],
+        versions: data.versions || [],
+        currentVersion: data.currentVersion || null
       }))
-      .catch(() => setMeta({ pets: [], perks: [], toys: [], packs: [] }));
+      .catch(() =>
+        setMeta({
+          pets: [],
+          perks: [],
+          toys: [],
+          packs: [],
+          versions: [],
+          currentVersion: null
+        })
+      );
   }, []);
 
   function buildListParams(nextFilters = filters, nextPage = page, nextPlayerId = selectedPlayerId) {
@@ -282,6 +301,7 @@ export default function LeaderboardPage() {
     if (nextFilters.scope) params.set("scope", nextFilters.scope);
     if (nextFilters.search) params.set("search", nextFilters.search);
     params.set("minMatches", normalizeMinMatches(nextFilters.minMatches));
+    if (nextFilters.version) params.set("version", nextFilters.version);
     if (nextFilters.pack) params.set("pack", nextFilters.pack);
     if (nextFilters.opponentPack) params.set("opponentPack", nextFilters.opponentPack);
     if (nextFilters.pet.length) params.set("pet", nextFilters.pet.join(","));
@@ -303,6 +323,7 @@ export default function LeaderboardPage() {
   function buildDetailParams(nextFilters = filters) {
     const params = new URLSearchParams();
     if (nextFilters.scope) params.set("scope", nextFilters.scope);
+    if (nextFilters.version) params.set("version", nextFilters.version);
     if (nextFilters.pack) params.set("pack", nextFilters.pack);
     if (nextFilters.opponentPack) params.set("opponentPack", nextFilters.opponentPack);
     if (nextFilters.pet.length) params.set("pet", nextFilters.pet.join(","));
@@ -382,6 +403,7 @@ export default function LeaderboardPage() {
       scope: params.get("scope") === "battle" ? "battle" : "game",
       search: params.get("search") || "",
       minMatches: normalizeMinMatches(params.get("minMatches") || String(MIN_MATCH_THRESHOLD)),
+      version: params.get("version") || "current",
       pack: params.get("pack") || "",
       opponentPack: params.get("opponentPack") || "",
       pet: parseCsvList(params.get("pet")),
@@ -525,6 +547,24 @@ export default function LeaderboardPage() {
                 onBlur={(e) => setFilters({ ...filters, minMatches: normalizeMinMatches(e.target.value) })}
                 placeholder={String(MIN_MATCH_THRESHOLD)}
               />
+            </div>
+            <div className="field">
+              <label>Version</label>
+              <select
+                value={filters.version}
+                onChange={(e) => setFilters({ ...filters, version: e.target.value })}
+              >
+                <option value="current">
+                  Current
+                  {meta.currentVersion ? ` (${meta.currentVersion})` : ""}
+                </option>
+                <option value="all">All Versions</option>
+                {(meta.versions || []).map((version) => (
+                  <option key={version} value={version}>
+                    {version}
+                  </option>
+                ))}
+              </select>
             </div>
             <div className="field">
               <label>Your Pack</label>

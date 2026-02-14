@@ -104,6 +104,7 @@ const THEMES = {
 
 const DEFAULT_FILTERS = {
   scope: "game",
+  version: "current",
   pack: "",
   opponentPack: "",
   minTurn: "",
@@ -218,7 +219,14 @@ function IconMultiSelect({ label, options, selected, onChange, placeholder }) {
 }
 
 export default function ProfilePage() {
-  const [meta, setMeta] = useState({ pets: [], perks: [], toys: [], packs: [] });
+  const [meta, setMeta] = useState({
+    pets: [],
+    perks: [],
+    toys: [],
+    packs: [],
+    versions: [],
+    currentVersion: null
+  });
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
   const [query, setQuery] = useState("");
   const [selectedPlayerId, setSelectedPlayerId] = useState("");
@@ -256,9 +264,20 @@ export default function ProfilePage() {
         pets: data.pets || [],
         perks: data.perks || [],
         toys: data.toys || [],
-        packs: data.packs || []
+        packs: data.packs || [],
+        versions: data.versions || [],
+        currentVersion: data.currentVersion || null
       }))
-      .catch(() => setMeta({ pets: [], perks: [], toys: [], packs: [] }));
+      .catch(() =>
+        setMeta({
+          pets: [],
+          perks: [],
+          toys: [],
+          packs: [],
+          versions: [],
+          currentVersion: null
+        })
+      );
   }, []);
 
   useEffect(() => {
@@ -268,6 +287,7 @@ export default function ProfilePage() {
   function buildParams(nextFilters = filters, playerIdValue = selectedPlayerId) {
     const params = new URLSearchParams();
     params.set("scope", nextFilters.scope || "game");
+    if (nextFilters.version) params.set("version", nextFilters.version);
     if (nextFilters.pack) params.set("pack", nextFilters.pack);
     if (nextFilters.opponentPack) params.set("opponentPack", nextFilters.opponentPack);
     if (nextFilters.scope === "battle") {
@@ -285,6 +305,7 @@ export default function ProfilePage() {
   function buildGameSearchParams(nextFilters = filters, playerIdValue = selectedPlayerId, pageValue = 1) {
     const params = new URLSearchParams();
     if (playerIdValue) params.set("playerId", playerIdValue);
+    if (nextFilters.version) params.set("version", nextFilters.version);
     if (nextFilters.pack && nextFilters.opponentPack) {
       params.set("packA", nextFilters.pack);
       params.set("packB", nextFilters.opponentPack);
@@ -422,12 +443,13 @@ export default function ProfilePage() {
     setGamesViewMode(normalized);
   }
 
-  async function resolvePlayer(queryValue, scopeValue = filters.scope) {
+  async function resolvePlayer(queryValue, scopeValue = filters.scope, versionValue = filters.version) {
     const term = (queryValue || "").trim();
     if (!term) return null;
     const params = new URLSearchParams();
     params.set("search", term);
     params.set("scope", scopeValue || "game");
+    if (versionValue) params.set("version", versionValue);
     params.set("page", "1");
     params.set("pageSize", "25");
     params.set("sort", "games");
@@ -497,6 +519,7 @@ export default function ProfilePage() {
     const nextFilters = {
       ...DEFAULT_FILTERS,
       scope: params.get("scope") === "battle" ? "battle" : "game",
+      version: params.get("version") || "current",
       pack: params.get("pack") || "",
       opponentPack: params.get("opponentPack") || "",
       minTurn: params.get("minTurn") || "",
@@ -767,6 +790,21 @@ export default function ProfilePage() {
               <select value={filters.scope} onChange={(e) => setFilters({ ...filters, scope: e.target.value })}>
                 <option value="game">Per Game</option>
                 <option value="battle">Per Round</option>
+              </select>
+            </div>
+            <div className="field">
+              <label>Version</label>
+              <select value={filters.version} onChange={(e) => setFilters({ ...filters, version: e.target.value })}>
+                <option value="current">
+                  Current
+                  {meta.currentVersion ? ` (${meta.currentVersion})` : ""}
+                </option>
+                <option value="all">All Versions</option>
+                {(meta.versions || []).map((version) => (
+                  <option key={version} value={version}>
+                    {version}
+                  </option>
+                ))}
               </select>
             </div>
             <div className="field">

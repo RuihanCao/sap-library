@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { pool } from "@/lib/db";
+import { resolveVersionFilter } from "@/lib/versionFilter";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -50,6 +51,7 @@ function buildBaseCte() {
         and r.pack != all($1::text[])
         and r.opponent_pack != all($1::text[])
         and ($2::text[] is null or coalesce(r.tags, '{}'::text[]) && $2::text[])
+        and ($14::text[] is null or r.game_version = any($14::text[]))
     ),
     spotlight_base as (
       select
@@ -405,6 +407,7 @@ export async function GET(req) {
   const sort = (searchParams.get("sort") || "winrate").toLowerCase();
   const order = (searchParams.get("order") || "desc").toLowerCase() === "asc" ? "asc" : "desc";
   const orderBy = buildOrder(scope, sort, order);
+  const { versions } = await resolveVersionFilter(pool, searchParams.get("version"));
 
   const values = [
     EXCLUDED_PACKS,
@@ -419,7 +422,8 @@ export async function GET(req) {
     search ? `%${search}%` : null,
     minMatches,
     pageSize,
-    offset
+    offset,
+    versions?.length ? versions : null
   ];
 
   const sql = scope === "battle" ? buildBattleSql(orderBy) : buildGameSql(orderBy);

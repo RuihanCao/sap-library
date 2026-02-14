@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { pool } from "@/lib/db";
+import { resolveVersionFilter } from "@/lib/versionFilter";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -41,6 +42,7 @@ function buildBaseCte() {
         and r.pack != all($1::text[])
         and r.opponent_pack != all($1::text[])
         and ($2::text[] is null or coalesce(r.tags, '{}'::text[]) && $2::text[])
+        and ($11::text[] is null or r.game_version = any($11::text[]))
     ),
     spotlight_base as (
       select
@@ -356,6 +358,7 @@ export async function GET(req, context) {
   const maxTurnRaw = parseNullableInt(searchParams.get("maxTurn"));
   const minTurn = scope === "battle" ? minTurnRaw : null;
   const maxTurn = scope === "battle" ? maxTurnRaw : null;
+  const { versions } = await resolveVersionFilter(pool, searchParams.get("version"));
 
   const values = [
     EXCLUDED_PACKS,
@@ -367,7 +370,8 @@ export async function GET(req, context) {
     toy.length ? toy : null,
     minTurn,
     maxTurn,
-    playerId
+    playerId,
+    versions?.length ? versions : null
   ];
 
   const sql = scope === "battle" ? buildBattleSql() : buildGameSql();

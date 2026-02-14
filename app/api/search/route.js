@@ -1,5 +1,6 @@
-﻿import { NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { pool } from "@/lib/db";
+import { resolveVersionFilter } from "@/lib/versionFilter";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,6 +28,7 @@ export async function GET(req) {
   const excludeA = searchParams.get("excludeA");
   const excludeB = searchParams.get("excludeB");
   const mirrorMatch = searchParams.get("mirrorMatch") === "true";
+  const versionFilterRaw = searchParams.get("version");
   const matchTypeList = Array.from(
     new Set(
       searchParams
@@ -92,6 +94,7 @@ export async function GET(req) {
 
   const clauses = [];
   const values = [];
+  const { versions } = await resolveVersionFilter(pool, versionFilterRaw);
 
   if (player) {
     values.push(`%${player}%`);
@@ -156,6 +159,11 @@ export async function GET(req) {
   if (tagList.length) {
     values.push(tagList);
     clauses.push(`coalesce(r.tags, '{}'::text[]) && $${values.length}`);
+  }
+
+  if (versions?.length) {
+    values.push(versions);
+    clauses.push(`r.game_version = any($${values.length})`);
   }
 
   if (startDate) {
