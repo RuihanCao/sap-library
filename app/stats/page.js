@@ -1179,7 +1179,16 @@ export default function StatsPage() {
               <div className="sort-panel" onClick={(e) => e.stopPropagation()}>
                 <div className="field">
                   <label>Sort</label>
-                  <select value={petSort} onChange={(e) => setPetSort(e.target.value)}>
+                  <select
+                    value={petSort}
+                    onChange={(e) => {
+                      const nextSort = e.target.value;
+                      setPetSort(nextSort);
+                      if (nextSort === "pack") {
+                        setPetOrder("asc");
+                      }
+                    }}
+                  >
                     {itemSortOptions.map((opt) => (
                       <option key={opt.value} value={opt.value}>{opt.label}</option>
                     ))}
@@ -1295,7 +1304,16 @@ export default function StatsPage() {
               <div className="sort-panel" onClick={(e) => e.stopPropagation()}>
                 <div className="field">
                   <label>Sort</label>
-                  <select value={perkSort} onChange={(e) => setPerkSort(e.target.value)}>
+                  <select
+                    value={perkSort}
+                    onChange={(e) => {
+                      const nextSort = e.target.value;
+                      setPerkSort(nextSort);
+                      if (nextSort === "pack") {
+                        setPerkOrder("asc");
+                      }
+                    }}
+                  >
                     {itemSortOptions.map((opt) => (
                       <option key={opt.value} value={opt.value}>{opt.label}</option>
                     ))}
@@ -1411,7 +1429,16 @@ export default function StatsPage() {
               <div className="sort-panel" onClick={(e) => e.stopPropagation()}>
                 <div className="field">
                   <label>Sort</label>
-                  <select value={toySort} onChange={(e) => setToySort(e.target.value)}>
+                  <select
+                    value={toySort}
+                    onChange={(e) => {
+                      const nextSort = e.target.value;
+                      setToySort(nextSort);
+                      if (nextSort === "pack") {
+                        setToyOrder("asc");
+                      }
+                    }}
+                  >
                     {itemSortOptions.map((opt) => (
                       <option key={opt.value} value={opt.value}>{opt.label}</option>
                     ))}
