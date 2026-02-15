@@ -10,9 +10,41 @@ function isFiniteRank(value) {
   return Number.isFinite(value) ? value : null;
 }
 
+function pickBestRankPair(primaryPlayerRank, primaryOpponentRank, mirroredPlayerRank, mirroredOpponentRank) {
+  const primaryDistinct =
+    primaryPlayerRank !== null &&
+    primaryOpponentRank !== null &&
+    primaryPlayerRank !== primaryOpponentRank;
+  const mirroredDistinct =
+    mirroredPlayerRank !== null &&
+    mirroredOpponentRank !== null &&
+    mirroredPlayerRank !== mirroredOpponentRank;
+
+  if (!primaryDistinct && mirroredDistinct) {
+    return {
+      playerRank: mirroredPlayerRank,
+      opponentRank: mirroredOpponentRank
+    };
+  }
+
+  if (primaryDistinct && !mirroredDistinct) {
+    return {
+      playerRank: primaryPlayerRank,
+      opponentRank: primaryOpponentRank
+    };
+  }
+
+  return {
+    playerRank: primaryPlayerRank ?? mirroredPlayerRank,
+    opponentRank: primaryOpponentRank ?? mirroredOpponentRank
+  };
+}
+
 async function enrichReplayWithOpponentRank(raw, parsed, participationId) {
-  let playerRank = isFiniteRank(parsed.playerRank);
-  let opponentRank = isFiniteRank(parsed.opponentRank);
+  const primaryPlayerRank = isFiniteRank(parsed.playerRank);
+  const primaryOpponentRank = isFiniteRank(parsed.opponentRank);
+  let playerRank = primaryPlayerRank;
+  let opponentRank = primaryOpponentRank;
   let opponentId = parsed.opponentId || null;
   let opponentParticipationId = parsed.opponentParticipationId || null;
 
@@ -21,12 +53,16 @@ async function enrichReplayWithOpponentRank(raw, parsed, participationId) {
       const opponentRaw = await fetchParticipationReplay(opponentParticipationId);
       const opponentParsed = parseReplay(opponentRaw);
       opponentId = opponentParsed.playerId || opponentId;
-      if (isFiniteRank(opponentParsed.playerRank) !== null) {
-        opponentRank = isFiniteRank(opponentParsed.playerRank);
-      }
-      if (playerRank === null && isFiniteRank(opponentParsed.opponentRank) !== null) {
-        playerRank = isFiniteRank(opponentParsed.opponentRank);
-      }
+      const opponentSidePlayerRank = isFiniteRank(opponentParsed.playerRank);
+      const opponentSideOpponentRank = isFiniteRank(opponentParsed.opponentRank);
+      const selected = pickBestRankPair(
+        primaryPlayerRank,
+        primaryOpponentRank,
+        opponentSideOpponentRank,
+        opponentSidePlayerRank
+      );
+      playerRank = selected.playerRank;
+      opponentRank = selected.opponentRank;
     } catch (error) {
       console.warn("Opponent replay fetch failed during rank enrichment (bulk)", {
         participationId,
