@@ -741,14 +741,14 @@ export default function LeaderboardPage() {
                   </strong>
                   <small>{player.playerId}</small>
                 </span>
-                <span>{player.games}</span>
-                <span>{player.rounds}</span>
-                <span className="rate-win">{player.wins}</span>
-                <span className="rate-loss">{player.losses}</span>
-                <span className="col-draw">{player.draws}</span>
-                <span className="rate-win">{pct(player.winrate)}</span>
-                <span>{fixed(player.avgRollsPerTurn)}</span>
-                <span className="gold-text">{fixed(player.avgGoldPerTurn)}</span>
+                <span className="metric-cell" data-label="Games">{player.games}</span>
+                <span className="metric-cell" data-label="Rounds">{player.rounds}</span>
+                <span className="metric-cell rate-win" data-label="Wins">{player.wins}</span>
+                <span className="metric-cell rate-loss" data-label="Losses">{player.losses}</span>
+                <span className="metric-cell col-draw" data-label="Draws">{player.draws}</span>
+                <span className="metric-cell rate-win" data-label="Winrate">{pct(player.winrate)}</span>
+                <span className="metric-cell" data-label="Avg Rolls">{fixed(player.avgRollsPerTurn)}</span>
+                <span className="metric-cell gold-text" data-label="Avg Gold">{fixed(player.avgGoldPerTurn)}</span>
               </button>
             );
           })}
