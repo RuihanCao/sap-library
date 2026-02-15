@@ -327,6 +327,9 @@ const DEFAULT_ENABLED = {
   matchType: false
 };
 
+const EXTENSION_ID = "ijgpconmeiannfdahleaekbpiflelmea";
+const EXTENSION_URL = "https://chromewebstore.google.com/detail/ijgpconmeiannfdahleaekbpiflelmea?utm_source=item-share-cb";
+
 export default function Page() {
   const [bulkText, setBulkText] = useState("");
   const [ingestStatus, setIngestStatus] = useState("");
@@ -365,6 +368,7 @@ export default function Page() {
   const [showTagEditor, setShowTagEditor] = useState(false);
   const [shareStatus, setShareStatus] = useState("");
   const [modalShareStatus, setModalShareStatus] = useState("");
+  const [showExtensionBanner, setShowExtensionBanner] = useState(true);
   const listSentinelRef = useRef(null);
   const replayImageVersion = "2026-02-12-text-fix";
 
@@ -393,6 +397,71 @@ export default function Page() {
         })
       )
       .catch(() => setMeta({ pets: [], perks: [], toys: [], packs: [], versions: [], currentVersion: null }));
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const hideBanner = () => {
+      if (!cancelled) setShowExtensionBanner(false);
+    };
+
+    try {
+      const cached = window.localStorage.getItem("sap_replay_extension_installed");
+      if (cached === "1") {
+        hideBanner();
+      }
+    } catch {
+      // ignore
+    }
+
+    const onMessage = (event) => {
+      if (event?.data?.type === "SAP_REPLAY_EXTENSION_INSTALLED") {
+        try {
+          window.localStorage.setItem("sap_replay_extension_installed", "1");
+        } catch {
+          // ignore
+        }
+        hideBanner();
+      }
+    };
+    window.addEventListener("message", onMessage);
+
+    const runtime = window.chrome?.runtime;
+    if (!runtime?.sendMessage) {
+      return () => {
+        cancelled = true;
+        window.removeEventListener("message", onMessage);
+      };
+    }
+
+    let settled = false;
+    const timeout = window.setTimeout(() => {
+      settled = true;
+    }, 800);
+
+    try {
+      runtime.sendMessage(EXTENSION_ID, { type: "SAP_LIBRARY_PING" }, () => {
+        if (cancelled || settled) return;
+        settled = true;
+        window.clearTimeout(timeout);
+        if (!window.chrome?.runtime?.lastError) {
+          try {
+            window.localStorage.setItem("sap_replay_extension_installed", "1");
+          } catch {
+            // ignore
+          }
+          hideBanner();
+        }
+      });
+    } catch {
+      window.clearTimeout(timeout);
+    }
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+      window.removeEventListener("message", onMessage);
+    };
   }, []);
 
   useEffect(() => {
@@ -1035,6 +1104,26 @@ export default function Page() {
           <h1>Sap Library</h1>
           <p>Upload replays, explore matchups, and search by any metric you could need.</p>
         </div>
+        {showExtensionBanner && (
+          <div className="extension-banner">
+            <img className="extension-banner-logo" src="/Sprite/Pets/Chameleon.png" alt="Extension logo" />
+            <div className="extension-banner-copy">
+              <strong>Auto-upload your games</strong>
+              <p>
+                Install the extension, open the <strong>History</strong> tab in the SAP web client, and your replays
+                will upload to this database automatically.
+              </p>
+            </div>
+            <a
+              className="extension-banner-cta"
+              href={EXTENSION_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Install Extension
+            </a>
+          </div>
+        )}
       </header>
 
       <section className="section" onClick={() => setShowSortMenu(false)}>

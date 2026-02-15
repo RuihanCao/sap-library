@@ -1373,6 +1373,76 @@ button:hover:not(:disabled) {
   color: var(--accent);
 }
 
+.extension-banner {
+  margin: 0;
+  flex: 1 1 420px;
+  max-width: 760px;
+  align-self: flex-end;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 2px solid rgba(43, 184, 164, 0.65);
+  background: linear-gradient(130deg, rgba(209, 255, 245, 0.92), rgba(232, 255, 250, 0.86));
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.7) inset,
+    0 12px 24px rgba(12, 62, 52, 0.24);
+  border-radius: 12px;
+}
+
+.extension-banner-logo {
+  width: 56px;
+  height: 56px;
+  object-fit: contain;
+  filter: drop-shadow(0 3px 6px rgba(12, 62, 52, 0.24));
+}
+
+.extension-banner-copy {
+  min-width: 0;
+}
+
+.extension-banner-copy strong {
+  display: block;
+  font-size: 17px;
+  line-height: 1.1;
+  color: #10483f;
+  margin-bottom: 4px;
+}
+
+.extension-banner-copy p {
+  margin: 0;
+  font-size: 13px;
+  color: #1a5b4f;
+}
+
+.extension-banner-copy p strong {
+  display: inline;
+  font-size: inherit;
+  margin: 0;
+  color: #0f433a;
+}
+
+.extension-banner-cta {
+  text-decoration: none;
+  color: #0f433a;
+  border: 1px solid rgba(15, 67, 58, 0.28);
+  background: rgba(255, 255, 255, 0.8);
+  padding: 9px 14px;
+  border-radius: 9px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  font-family: "Lapsus Pro", "Inter", sans-serif;
+  box-shadow: 0 8px 16px rgba(12, 62, 52, 0.14);
+}
+
+.extension-banner-cta:hover {
+  border-color: rgba(15, 67, 58, 0.5);
+  background: rgba(255, 255, 255, 0.95);
+}
+
 .stats-table {
   display: grid;
   gap: 8px;
@@ -1937,6 +2007,10 @@ button:hover:not(:disabled) {
     margin-left: 0;
   }
 
+  .extension-banner {
+    display: none;
+  }
+
   .results-actions {
     width: 100%;
     justify-content: space-between;
@@ -2028,5 +2102,11 @@ button:hover:not(:disabled) {
 
   .leaderboard-row > * {
     grid-area: auto !important;
+  }
+}
+
+@media (max-width: 900px) {
+  .extension-banner {
+    display: none;
   }
 }
