@@ -1,0 +1,118 @@
+require("dotenv").config({ path: ".env.local" });
+const { Pool } = require("pg");
+const { parseReplay } = require("../lib/parse");
+const { fetchParticipationReplay } = require("../lib/sapPlayback");
+
+function isFiniteRank(value) {
+  return Number.isFinite(value) ? value : null;
+}
+
+async function resolveReplayRanks(primaryParticipationId) {
+  const primaryRaw = await fetchParticipationReplay(primaryParticipationId);
+  const primaryParsed = parseReplay(primaryRaw);
+
+  let playerId = primaryParsed.playerId || null;
+  let opponentId = primaryParsed.opponentId || null;
+  let opponentParticipationId = primaryParsed.opponentParticipationId || null;
+  let playerRank = isFiniteRank(primaryParsed.playerRank);
+  let opponentRank = isFiniteRank(primaryParsed.opponentRank);
+
+  if (opponentParticipationId && opponentParticipationId !== primaryParticipationId) {
+    try {
+      const opponentRaw = await fetchParticipationReplay(opponentParticipationId);
+      const opponentParsed = parseReplay(opponentRaw);
+      opponentId = opponentParsed.playerId || opponentId;
+      if (isFiniteRank(opponentParsed.playerRank) !== null) {
+        opponentRank = isFiniteRank(opponentParsed.playerRank);
+      }
+      if (playerRank === null && isFiniteRank(opponentParsed.opponentRank) !== null) {
+        playerRank = isFiniteRank(opponentParsed.opponentRank);
+      }
+      if (!playerId && opponentParsed.opponentId) {
+        playerId = opponentParsed.opponentId;
+      }
+    } catch (error) {
+      console.warn("Opponent replay fetch failed while backfilling rank", {
+        participationId: primaryParticipationId,
+        opponentParticipationId,
+        error: error?.message || "failed"
+      });
+    }
+  }
+
+  return {
+    raw: primaryRaw,
+    parsed: primaryParsed,
+    playerId,
+    opponentId,
+    opponentParticipationId,
+    playerRank,
+    opponentRank
+  };
+}
+
+async function main() {
+  const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+  const client = await pool.connect();
+
+  try {
+    const { rows } = await client.query(
+      `select id, participation_id
+       from replays
+       where game_version = '45'
+       order by created_at asc`
+    );
+
+    console.log(`Version 45 replays found: ${rows.length}`);
+
+    let updated = 0;
+    let failed = 0;
+
+    for (const row of rows) {
+      try {
+        const enriched = await resolveReplayRanks(row.participation_id);
+        await client.query(
+          `update replays
+           set
+             player_id = $1,
+             opponent_id = $2,
+             opponent_participation_id = $3,
+             player_rank = $4,
+             opponent_rank = $5,
+             game_version = $6,
+             raw_json = $7
+           where id = $8`,
+          [
+            enriched.playerId,
+            enriched.opponentId,
+            enriched.opponentParticipationId,
+            enriched.playerRank,
+            enriched.opponentRank,
+            enriched.parsed.gameVersion || "45",
+            enriched.raw,
+            row.id
+          ]
+        );
+        updated += 1;
+      } catch (error) {
+        failed += 1;
+        console.error("Rank backfill failed", {
+          replayId: row.id,
+          participationId: row.participation_id,
+          error: error?.message || "failed"
+        });
+      }
+    }
+
+    console.log(`Updated: ${updated}`);
+    console.log(`Failed: ${failed}`);
+  } finally {
+    client.release();
+    await pool.end();
+  }
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

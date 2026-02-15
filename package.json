@@ -7,7 +7,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "backfill:game-version": "node scripts/backfill-game-version.js"
+    "backfill:game-version": "node scripts/backfill-game-version.js",
+    "backfill:ranks-v45": "node scripts/backfill-ranks-v45.js"
   },
   "author": "",
   "license": "ISC",

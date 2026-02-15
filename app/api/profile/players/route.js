@@ -27,7 +27,7 @@ export async function GET(req) {
   const sql = `
     with source_rows as (
       select
-        nullif(r.raw_json->>'UserId', '') as player_id,
+        coalesce(r.player_id, nullif(r.raw_json->>'UserId', '')) as player_id,
         nullif(r.player_name, '') as player_name,
         r.created_at
       from replays r
@@ -37,7 +37,7 @@ export async function GET(req) {
       union all
 
       select
-        nullif((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'UserId'), '') as player_id,
+        coalesce(r.opponent_id, nullif((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'UserId'), '')) as player_id,
         nullif(r.opponent_name, '') as player_name,
         r.created_at
       from replays r

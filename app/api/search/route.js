@@ -167,7 +167,12 @@ export async function GET(req) {
     values.push(playerId, `%${playerId}%`);
     const exactIdx = values.length - 1;
     const likeIdx = values.length;
-    clauses.push(`((r.raw_json->>'UserId') = $${exactIdx} or coalesce(r.raw_json->>'GenesisModeModel', '') ilike $${likeIdx})`);
+    clauses.push(`(
+      r.player_id = $${exactIdx}
+      or r.opponent_id = $${exactIdx}
+      or (r.raw_json->>'UserId') = $${exactIdx}
+      or coalesce(r.raw_json->>'GenesisModeModel', '') ilike $${likeIdx}
+    )`);
   }
 
   if (pid) {
@@ -182,8 +187,24 @@ export async function GET(req) {
 
   if (minRank !== null) {
     values.push(minRank);
-    const rankExprPlayer = `coalesce((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank')::int, 0)`;
-    const rankExprOpponent = `coalesce((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank')::int, 0)`;
+    const rankExprPlayer = `coalesce(
+      r.player_rank,
+      case
+        when ((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank') ~ '^[0-9]+$')
+          then (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank')::int
+        else null
+      end,
+      0
+    )`;
+    const rankExprOpponent = `coalesce(
+      r.opponent_rank,
+      case
+        when ((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank') ~ '^[0-9]+$')
+          then (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank')::int
+        else null
+      end,
+      0
+    )`;
     if (minRankMode === "both") {
       clauses.push(`(${rankExprPlayer} >= $${values.length} and ${rankExprOpponent} >= $${values.length})`);
     } else {
@@ -478,8 +499,22 @@ export async function GET(req) {
   const dataSql = `
     select r.id, r.participation_id, r.player_name, r.opponent_name, r.pack, r.opponent_pack, r.game_version, r.match_type, r.mode,
            r.max_player_count, r.active_player_count, r.created_at, r.tags, lt.outcome as last_outcome,
-           (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank')::int as player_rank,
-           (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank')::int as opponent_rank
+           coalesce(
+             r.player_rank,
+             case
+               when ((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank') ~ '^[0-9]+$')
+                 then (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank')::int
+               else null
+             end
+           ) as player_rank,
+           coalesce(
+             r.opponent_rank,
+             case
+               when ((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank') ~ '^[0-9]+$')
+                 then (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank')::int
+               else null
+             end
+           ) as opponent_rank
     ${fromSql}
     left join lateral (
       select t.outcome

@@ -42,6 +42,11 @@ export async function GET(_req, context) {
          max_player_count,
          active_player_count,
          spectator_mode,
+         player_id,
+         opponent_id,
+         opponent_participation_id,
+         player_rank,
+         opponent_rank,
          tags,
          created_at,
          raw_json
@@ -68,22 +73,26 @@ export async function GET(_req, context) {
       [id]
     );
 
-    let playerId = null;
-    let opponentId = null;
-    let opponentParticipationId = null;
-    let playerRank = null;
-    let opponentRank = null;
+    let playerId = replayRes.rows[0].player_id || null;
+    let opponentId = replayRes.rows[0].opponent_id || null;
+    let opponentParticipationId = replayRes.rows[0].opponent_participation_id || null;
+    let playerRank = Number.isFinite(replayRes.rows[0].player_rank) ? replayRes.rows[0].player_rank : null;
+    let opponentRank = Number.isFinite(replayRes.rows[0].opponent_rank) ? replayRes.rows[0].opponent_rank : null;
     try {
       const raw = replayRes.rows[0].raw_json;
-      playerId = raw?.UserId || null;
+      playerId = playerId || raw?.UserId || null;
       try {
         const modeModel = raw?.GenesisModeModel ? JSON.parse(raw.GenesisModeModel) : null;
-        opponentId = modeModel?.Opponents?.[0]?.UserId || null;
-        opponentParticipationId = modeModel?.Opponents?.[0]?.ParticipationId || null;
+        opponentId = opponentId || modeModel?.Opponents?.[0]?.UserId || null;
+        opponentParticipationId = opponentParticipationId || modeModel?.Opponents?.[0]?.ParticipationId || null;
         const parsedPlayerRank = modeModel?.Rank;
         const parsedOpponentRank = modeModel?.Opponents?.[0]?.Rank;
-        playerRank = Number.isFinite(parsedPlayerRank) ? parsedPlayerRank : null;
-        opponentRank = Number.isFinite(parsedOpponentRank) ? parsedOpponentRank : null;
+        if (playerRank === null) {
+          playerRank = Number.isFinite(parsedPlayerRank) ? parsedPlayerRank : null;
+        }
+        if (opponentRank === null) {
+          opponentRank = Number.isFinite(parsedOpponentRank) ? parsedOpponentRank : null;
+        }
       } catch {
         // ignore
       }

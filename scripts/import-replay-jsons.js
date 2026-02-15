@@ -141,9 +141,14 @@ async function ingestReplay(client, raw, filePath, indexInFile) {
          max_player_count,
          active_player_count,
          spectator_mode,
+         player_id,
+         opponent_id,
+         opponent_participation_id,
+         player_rank,
+         opponent_rank,
          raw_json
        )
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
        on conflict do nothing
        returning id`,
       [
@@ -162,6 +167,11 @@ async function ingestReplay(client, raw, filePath, indexInFile) {
         parsed.maxPlayerCount,
         parsed.activePlayerCount,
         parsed.spectatorMode,
+        parsed.playerId,
+        parsed.opponentId,
+        parsed.opponentParticipationId,
+        parsed.playerRank,
+        parsed.opponentRank,
         raw
       ]
     );

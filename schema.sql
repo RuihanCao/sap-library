@@ -1,4 +1,4 @@
-﻿create extension if not exists "uuid-ossp";
+create extension if not exists "uuid-ossp";
 
 create table if not exists replays (
   id uuid primary key default uuid_generate_v4(),
@@ -22,6 +22,11 @@ create table if not exists replays (
   created_at timestamptz default now()
 );
 alter table replays add column if not exists match_id text;
+alter table replays add column if not exists player_id text;
+alter table replays add column if not exists opponent_id text;
+alter table replays add column if not exists opponent_participation_id text;
+alter table replays add column if not exists player_rank int;
+alter table replays add column if not exists opponent_rank int;
 
 create table if not exists turns (
   id uuid primary key default uuid_generate_v4(),
@@ -61,6 +66,10 @@ create index if not exists idx_replays_pack on replays(pack);
 create index if not exists idx_replays_opponent_pack on replays(opponent_pack);
 create index if not exists idx_replays_game_version on replays(game_version);
 create index if not exists idx_replays_opponent_name on replays(opponent_name);
+create index if not exists idx_replays_player_id on replays(player_id);
+create index if not exists idx_replays_opponent_id on replays(opponent_id);
+create index if not exists idx_replays_player_rank on replays(player_rank);
+create index if not exists idx_replays_opponent_rank on replays(opponent_rank);
 create index if not exists idx_replays_match_type on replays(match_type);
 create index if not exists idx_replays_mode on replays(mode);
 create index if not exists idx_replays_tags on replays using gin (tags);

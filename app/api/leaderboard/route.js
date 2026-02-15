@@ -41,8 +41,8 @@ function buildBaseCte() {
         r.opponent_pack as opponent_pack,
         r.player_name,
         r.opponent_name,
-        nullif(r.raw_json->>'UserId', '') as player_id,
-        nullif((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'UserId'), '') as opponent_id,
+        coalesce(r.player_id, nullif(r.raw_json->>'UserId', '')) as player_id,
+        coalesce(r.opponent_id, nullif((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'UserId'), '')) as opponent_id,
         coalesce(r.tags, '{}'::text[]) as tags
       from replays r
       where r.match_type != 'arena'

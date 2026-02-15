@@ -102,7 +102,12 @@ export async function GET(req) {
     values.push(playerId, `%${playerId}%`);
     playerIdExactIndex = values.length - 1;
     playerIdLikeIndex = values.length;
-    clauses.push(`((r.raw_json->>'UserId') = $${playerIdExactIndex} or coalesce(r.raw_json->>'GenesisModeModel', '') ilike $${playerIdLikeIndex})`);
+    clauses.push(`(
+      r.player_id = $${playerIdExactIndex}
+      or r.opponent_id = $${playerIdExactIndex}
+      or (r.raw_json->>'UserId') = $${playerIdExactIndex}
+      or coalesce(r.raw_json->>'GenesisModeModel', '') ilike $${playerIdLikeIndex}
+    )`);
   }
   if (tags.length) {
     values.push(tags);
@@ -165,10 +170,13 @@ export async function GET(req) {
     includeOpponentSideExprParts.push(`r.opponent_name ilike $${playerNameIndex}`);
   }
   if (playerIdExactIndex !== null) {
-    includePlayerSideExprParts.push(`(r.raw_json->>'UserId') = $${playerIdExactIndex}`);
+    includePlayerSideExprParts.push(`coalesce(r.player_id, r.raw_json->>'UserId') = $${playerIdExactIndex}`);
   }
   if (playerIdLikeIndex !== null) {
-    includeOpponentSideExprParts.push(`coalesce(r.raw_json->>'GenesisModeModel', '') ilike $${playerIdLikeIndex}`);
+    includeOpponentSideExprParts.push(`(
+      r.opponent_id = $${playerIdExactIndex}
+      or coalesce(r.raw_json->>'GenesisModeModel', '') ilike $${playerIdLikeIndex}
+    )`);
   }
 
   const includePlayerSideExpr = includePlayerSideExprParts.length
@@ -189,16 +197,22 @@ export async function GET(req) {
         r.pack,
         r.opponent_pack,
         r.match_type,
-        case
-          when ((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank') ~ '^[0-9]+$')
-            then (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank')::int
-          else null
-        end as player_rank,
-        case
-          when ((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank') ~ '^[0-9]+$')
-            then (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank')::int
-          else null
-        end as opponent_rank,
+        coalesce(
+          r.player_rank,
+          case
+            when ((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank') ~ '^[0-9]+$')
+              then (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank')::int
+            else null
+          end
+        ) as player_rank,
+        coalesce(
+          r.opponent_rank,
+          case
+            when ((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank') ~ '^[0-9]+$')
+              then (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank')::int
+            else null
+          end
+        ) as opponent_rank,
         r.created_at,
         (${includePlayerSideExpr}) as include_player_side,
         (${includeOpponentSideExpr}) as include_opponent_side
@@ -602,16 +616,22 @@ export async function GET(req) {
         r.pack,
         r.opponent_pack,
         r.match_type,
-        case
-          when ((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank') ~ '^[0-9]+$')
-            then (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank')::int
-          else null
-        end as player_rank,
-        case
-          when ((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank') ~ '^[0-9]+$')
-            then (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank')::int
-          else null
-        end as opponent_rank,
+        coalesce(
+          r.player_rank,
+          case
+            when ((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank') ~ '^[0-9]+$')
+              then (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank')::int
+            else null
+          end
+        ) as player_rank,
+        coalesce(
+          r.opponent_rank,
+          case
+            when ((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank') ~ '^[0-9]+$')
+              then (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank')::int
+            else null
+          end
+        ) as opponent_rank,
         r.created_at,
         (${includePlayerSideExpr}) as include_player_side,
         (${includeOpponentSideExpr}) as include_opponent_side
