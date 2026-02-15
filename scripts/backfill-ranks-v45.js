@@ -41,6 +41,13 @@ function isFiniteRank(value) {
   return Number.isFinite(value) ? value : null;
 }
 
+function sanitizeRanksForMatchType(matchType, playerRank, opponentRank) {
+  if (String(matchType || "").toLowerCase() !== "private") {
+    return { playerRank, opponentRank };
+  }
+  return { playerRank: null, opponentRank: null };
+}
+
 function pickBestRankPair(primaryPlayerRank, primaryOpponentRank, mirroredPlayerRank, mirroredOpponentRank) {
   const primaryDistinct =
     primaryPlayerRank !== null &&
@@ -159,6 +166,11 @@ async function main() {
     for (const row of rows) {
       try {
         const enriched = await resolveReplayRanks(row.participation_id);
+        const sanitized = sanitizeRanksForMatchType(
+          enriched.parsed.matchType,
+          enriched.playerRank,
+          enriched.opponentRank
+        );
         await client.query(
           `update replays
            set
@@ -174,8 +186,8 @@ async function main() {
             enriched.playerId,
             enriched.opponentId,
             enriched.opponentParticipationId,
-            enriched.playerRank,
-            enriched.opponentRank,
+            sanitized.playerRank,
+            sanitized.opponentRank,
             enriched.parsed.gameVersion || options.version || null,
             enriched.raw,
             row.id

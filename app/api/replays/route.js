@@ -67,6 +67,17 @@ function isFiniteRank(value) {
   return Number.isFinite(value) ? value : null;
 }
 
+function sanitizeRanksForMatchType(parsed) {
+  if (String(parsed?.matchType || "").toLowerCase() !== "private") {
+    return parsed;
+  }
+  return {
+    ...parsed,
+    playerRank: null,
+    opponentRank: null
+  };
+}
+
 function pickBestRankPair(primaryPlayerRank, primaryOpponentRank, mirroredPlayerRank, mirroredOpponentRank) {
   const primaryDistinct =
     primaryPlayerRank !== null &&
@@ -177,7 +188,7 @@ export async function POST(req) {
     const parsed = parseReplay(raw);
     const enriched = await enrichReplayWithOpponentRank(raw, parsed, participationId);
     const finalRaw = enriched.raw;
-    const finalParsed = enriched.parsed;
+    const finalParsed = sanitizeRanksForMatchType(enriched.parsed);
     const normalizedMatchId =
       (finalParsed.matchType || "").toLowerCase() === "arena" ? null : finalParsed.matchId;
 

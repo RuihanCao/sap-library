@@ -187,28 +187,32 @@ export async function GET(req) {
 
   if (minRank !== null) {
     values.push(minRank);
-    const rankExprPlayer = `coalesce(
-      r.player_rank,
-      case
-        when ((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank') ~ '^[0-9]+$')
-          then (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank')::int
-        else null
-      end,
-      0
-    )`;
-    const rankExprOpponent = `coalesce(
-      r.opponent_rank,
-      case
-        when ((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank') ~ '^[0-9]+$')
-          then (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank')::int
-        else null
-      end,
-      0
-    )`;
+    const rankExprPlayer = `case
+      when lower(coalesce(r.match_type, '')) = 'private' then null
+      else coalesce(
+        r.player_rank,
+        case
+          when ((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank') ~ '^[0-9]+$')
+            then (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank')::int
+          else null
+        end
+      )
+    end`;
+    const rankExprOpponent = `case
+      when lower(coalesce(r.match_type, '')) = 'private' then null
+      else coalesce(
+        r.opponent_rank,
+        case
+          when ((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank') ~ '^[0-9]+$')
+            then (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank')::int
+          else null
+        end
+      )
+    end`;
     if (minRankMode === "both") {
-      clauses.push(`(${rankExprPlayer} >= $${values.length} and ${rankExprOpponent} >= $${values.length})`);
+      clauses.push(`(coalesce(${rankExprPlayer}, 0) >= $${values.length} and coalesce(${rankExprOpponent}, 0) >= $${values.length})`);
     } else {
-      clauses.push(`(${rankExprPlayer} >= $${values.length} or ${rankExprOpponent} >= $${values.length})`);
+      clauses.push(`(coalesce(${rankExprPlayer}, 0) >= $${values.length} or coalesce(${rankExprOpponent}, 0) >= $${values.length})`);
     }
   }
 
@@ -496,25 +500,70 @@ export async function GET(req) {
   const total = Number(countResult.rows[0]?.total || 0);
 
   values.push(pageSize, offset);
+  const playerIdExpr = `coalesce(r.player_id, nullif(r.raw_json->>'UserId', ''))`;
+  const opponentIdExpr = `coalesce(r.opponent_id, nullif((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'UserId'), ''))`;
+  const playerRankFallbackExpr = `case
+    when ((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank') ~ '^[0-9]+$')
+      then (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank')::int
+    else null
+  end`;
+  const opponentRankFallbackExpr = `case
+    when ((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank') ~ '^[0-9]+$')
+      then (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank')::int
+    else null
+  end`;
+  const rankFromPlayerSideExpr = `coalesce(
+    r2.player_rank,
+    case
+      when ((nullif(r2.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank') ~ '^[0-9]+$')
+        then (nullif(r2.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank')::int
+      else null
+    end
+  )`;
+  const rankFromOpponentSideExpr = `coalesce(
+    r2.opponent_rank,
+    case
+      when ((nullif(r2.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank') ~ '^[0-9]+$')
+        then (nullif(r2.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank')::int
+      else null
+    end
+  )`;
+  const closestRankById = (idExpr) => `(
+    select rr.rank
+    from (
+      select ${rankFromPlayerSideExpr} as rank, r2.created_at
+      from replays r2
+      where lower(coalesce(r2.match_type, '')) = 'ranked'
+        and r2.player_id = ${idExpr}
+      union all
+      select ${rankFromOpponentSideExpr} as rank, r2.created_at
+      from replays r2
+      where lower(coalesce(r2.match_type, '')) = 'ranked'
+        and r2.opponent_id = ${idExpr}
+    ) rr
+    where rr.rank is not null
+    order by abs(extract(epoch from (rr.created_at - r.created_at))) asc, rr.created_at desc
+    limit 1
+  )`;
+  const privatePlayerDisplayRankExpr = closestRankById(playerIdExpr);
+  const privateOpponentDisplayRankExpr = closestRankById(opponentIdExpr);
   const dataSql = `
     select r.id, r.participation_id, r.player_name, r.opponent_name, r.pack, r.opponent_pack, r.game_version, r.match_type, r.mode,
            r.max_player_count, r.active_player_count, r.created_at, r.tags, lt.outcome as last_outcome,
-           coalesce(
-             r.player_rank,
-             case
-               when ((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank') ~ '^[0-9]+$')
-                 then (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank')::int
-               else null
-             end
-           ) as player_rank,
-           coalesce(
-             r.opponent_rank,
-             case
-               when ((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank') ~ '^[0-9]+$')
-                 then (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank')::int
-               else null
-             end
-           ) as opponent_rank
+           case
+             when lower(coalesce(r.match_type, '')) = 'private' then ${privatePlayerDisplayRankExpr}
+             else coalesce(
+                r.player_rank,
+                ${playerRankFallbackExpr}
+             )
+           end as player_rank,
+           case
+             when lower(coalesce(r.match_type, '')) = 'private' then ${privateOpponentDisplayRankExpr}
+             else coalesce(
+                r.opponent_rank,
+                ${opponentRankFallbackExpr}
+             )
+           end as opponent_rank
     ${fromSql}
     left join lateral (
       select t.outcome

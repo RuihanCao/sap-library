@@ -1193,6 +1193,10 @@ export default function ProfilePage() {
                   </div>
                   <div><span className="label">Game Type</span><span>{(modalData.replay.match_type || "unknown").toUpperCase()}</span></div>
                   <div><span className="label">Version</span><span>{modalData.replay.game_version || "?"}</span></div>
+                  <div>
+                    <span className="label">Played</span>
+                    <span>{modalData.replay.created_at ? new Date(modalData.replay.created_at).toLocaleString() : "?"}</span>
+                  </div>
                   <div><span className="label">Participation</span><span>{modalData.replay.participation_id}</span></div>
                   <div>
                     <span className="label">
@@ -1222,7 +1226,7 @@ export default function ProfilePage() {
                     <h4>{modalData.replay.player_name || "Unknown Player"}</h4>
                     <div className="stat">
                       <span className="label">Rank</span>
-                      <span>{modalData.replay.player_rank ?? "?"}</span>
+                      <span>{modalData.replay.player_rank_display ?? modalData.replay.player_rank ?? "?"}</span>
                     </div>
                     <div className="stat">
                       <span className="label gold-text">Gold Spent</span>
@@ -1235,7 +1239,7 @@ export default function ProfilePage() {
                       <h4>{modalData.replay.opponent_name || "Unknown"}</h4>
                       <div className="stat">
                         <span className="label">Rank</span>
-                        <span>{modalData.replay.opponent_rank ?? "?"}</span>
+                        <span>{modalData.replay.opponent_rank_display ?? modalData.replay.opponent_rank ?? "?"}</span>
                       </div>
                       <div className="stat">
                         <span className="label gold-text">Gold Spent</span>

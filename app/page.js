@@ -1763,6 +1763,10 @@ export default function Page() {
                   </div>
                   <div><span className="label">Game Type</span><span>{(modalData.replay.match_type || "unknown").toUpperCase()}</span></div>
                   <div><span className="label">Version</span><span>{modalData.replay.game_version || "?"}</span></div>
+                  <div>
+                    <span className="label">Played</span>
+                    <span>{modalData.replay.created_at ? new Date(modalData.replay.created_at).toLocaleString() : "?"}</span>
+                  </div>
                   <div><span className="label">Participation</span><span>{modalData.replay.participation_id}</span></div>
                   <div><span className="label">Turns</span><span>{modalData.stats?.turns ?? "?"}</span></div>
                   <div><span className="label">Max Lives</span><span>{modalData.replay.max_lives ?? "?"}</span></div>
@@ -1825,7 +1829,7 @@ export default function Page() {
                     </div>
                     <div className="stat">
                       <span className="label">Rank</span>
-                      <span>{modalData.replay.player_rank ?? "?"}</span>
+                      <span>{modalData.replay.player_rank_display ?? modalData.replay.player_rank ?? "?"}</span>
                     </div>
                     <div className="stat" onClick={maybeUnlockTags} role="button" tabIndex={0} onKeyDown={(e) => e.key === "Enter" && maybeUnlockTags(e)}>
                       <span className="label">Gold Spent</span>
@@ -1857,7 +1861,7 @@ export default function Page() {
                       </div>
                       <div className="stat">
                         <span className="label">Rank</span>
-                        <span>{modalData.replay.opponent_rank ?? "?"}</span>
+                        <span>{modalData.replay.opponent_rank_display ?? modalData.replay.opponent_rank ?? "?"}</span>
                       </div>
                       <div className="stat" onClick={maybeUnlockTags} role="button" tabIndex={0} onKeyDown={(e) => e.key === "Enter" && maybeUnlockTags(e)}>
                         <span className="label">Gold Spent</span>

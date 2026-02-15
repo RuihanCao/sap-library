@@ -119,8 +119,12 @@ function extractParticipationId(raw, filePath, indexInFile) {
 async function ingestReplay(client, raw, filePath, indexInFile) {
   const participationId = extractParticipationId(raw, filePath, indexInFile);
   const parsed = parseReplay(raw);
+  const finalParsed =
+    (parsed.matchType || "").toLowerCase() === "private"
+      ? { ...parsed, playerRank: null, opponentRank: null }
+      : parsed;
   const normalizedMatchId =
-    (parsed.matchType || "").toLowerCase() === "arena" ? null : parsed.matchId;
+    (finalParsed.matchType || "").toLowerCase() === "arena" ? null : finalParsed.matchId;
 
   await client.query("begin");
   try {
@@ -154,24 +158,24 @@ async function ingestReplay(client, raw, filePath, indexInFile) {
       [
         participationId,
         normalizedMatchId,
-        parsed.playerName,
-        parsed.opponentName,
-        parsed.packName,
-        parsed.opponentPackName,
-        parsed.gameVersion,
-        parsed.maxLives,
-        parsed.mode,
-        parsed.matchType,
-        parsed.matchName,
-        parsed.matchPack,
-        parsed.maxPlayerCount,
-        parsed.activePlayerCount,
-        parsed.spectatorMode,
-        parsed.playerId,
-        parsed.opponentId,
-        parsed.opponentParticipationId,
-        parsed.playerRank,
-        parsed.opponentRank,
+        finalParsed.playerName,
+        finalParsed.opponentName,
+        finalParsed.packName,
+        finalParsed.opponentPackName,
+        finalParsed.gameVersion,
+        finalParsed.maxLives,
+        finalParsed.mode,
+        finalParsed.matchType,
+        finalParsed.matchName,
+        finalParsed.matchPack,
+        finalParsed.maxPlayerCount,
+        finalParsed.activePlayerCount,
+        finalParsed.spectatorMode,
+        finalParsed.playerId,
+        finalParsed.opponentId,
+        finalParsed.opponentParticipationId,
+        finalParsed.playerRank,
+        finalParsed.opponentRank,
         raw
       ]
     );
@@ -195,10 +199,10 @@ async function ingestReplay(client, raw, filePath, indexInFile) {
       return { status: "skipped_conflict" };
     }
 
-    if (parsed.turns.length) {
+    if (finalParsed.turns.length) {
       const turnValues = [];
       const turnRows = [];
-      for (const t of parsed.turns) {
+      for (const t of finalParsed.turns) {
         turnRows.push([
           replayId,
           t.turn_number,
@@ -240,10 +244,10 @@ async function ingestReplay(client, raw, filePath, indexInFile) {
       );
     }
 
-    if (parsed.pets.length) {
+    if (finalParsed.pets.length) {
       const petValues = [];
       const petRows = [];
-      for (const p of parsed.pets) {
+      for (const p of finalParsed.pets) {
         petRows.push([
           replayId,
           p.turn_number,
