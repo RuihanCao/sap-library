@@ -8,7 +8,8 @@
     "build": "next build",
     "start": "next start",
     "backfill:game-version": "node scripts/backfill-game-version.js",
-    "backfill:ranks-v45": "node scripts/backfill-ranks-v45.js"
+    "backfill:ranks-v45": "node scripts/backfill-ranks-v45.js",
+    "backfill:ranks-recent": "node scripts/backfill-ranks-v45.js --recent-hours=1 --all-versions"
   },
   "author": "",
   "license": "ISC",

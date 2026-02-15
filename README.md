@@ -59,3 +59,7 @@ Open `http://localhost:3000`.
 ```powershell
 npm run backfill:ranks-v45
 ```
+- To backfill ranks/IDs for replays created in the last hour (all versions):
+```powershell
+npm run backfill:ranks-recent
+```

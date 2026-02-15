@@ -3,6 +3,40 @@ const { Pool } = require("pg");
 const { parseReplay } = require("../lib/parse");
 const { fetchParticipationReplay } = require("../lib/sapPlayback");
 
+function parseArgs(argv) {
+  const options = {
+    version: "45",
+    recentHours: null,
+    allVersions: false
+  };
+
+  for (const arg of argv) {
+    if (arg === "--all-versions") {
+      options.allVersions = true;
+      continue;
+    }
+
+    if (arg.startsWith("--version=")) {
+      const value = arg.slice("--version=".length).trim();
+      options.version = value || null;
+      continue;
+    }
+
+    if (arg.startsWith("--recent-hours=")) {
+      const value = Number(arg.slice("--recent-hours=".length));
+      if (Number.isFinite(value) && value > 0) {
+        options.recentHours = Math.floor(value);
+      }
+    }
+  }
+
+  if (options.allVersions) {
+    options.version = null;
+  }
+
+  return options;
+}
+
 function isFiniteRank(value) {
   return Number.isFinite(value) ? value : null;
 }
@@ -88,18 +122,36 @@ async function resolveReplayRanks(primaryParticipationId) {
 }
 
 async function main() {
+  const options = parseArgs(process.argv.slice(2));
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   const client = await pool.connect();
 
   try {
+    const whereClauses = [];
+    const whereValues = [];
+
+    if (options.version) {
+      whereValues.push(options.version);
+      whereClauses.push(`game_version = $${whereValues.length}`);
+    }
+
+    if (options.recentHours !== null) {
+      whereValues.push(options.recentHours);
+      whereClauses.push(`created_at >= now() - ($${whereValues.length}::int * interval '1 hour')`);
+    }
+
+    const whereSql = whereClauses.length ? `where ${whereClauses.join(" and ")}` : "";
     const { rows } = await client.query(
       `select id, participation_id
        from replays
-       where game_version = '45'
-       order by created_at asc`
+       ${whereSql}
+       order by created_at asc`,
+      whereValues
     );
 
-    console.log(`Version 45 replays found: ${rows.length}`);
+    console.log(
+      `Replays found: ${rows.length} (version=${options.version ?? "all"}, recentHours=${options.recentHours ?? "all"})`
+    );
 
     let updated = 0;
     let failed = 0;
@@ -115,7 +167,7 @@ async function main() {
              opponent_participation_id = $3,
              player_rank = $4,
              opponent_rank = $5,
-             game_version = $6,
+             game_version = coalesce($6, game_version),
              raw_json = $7
            where id = $8`,
           [
@@ -124,7 +176,7 @@ async function main() {
             enriched.opponentParticipationId,
             enriched.playerRank,
             enriched.opponentRank,
-            enriched.parsed.gameVersion || "45",
+            enriched.parsed.gameVersion || options.version || null,
             enriched.raw,
             row.id
           ]
