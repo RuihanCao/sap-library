@@ -188,6 +188,17 @@ export async function GET(req) {
         r.id,
         r.pack,
         r.opponent_pack,
+        r.match_type,
+        case
+          when ((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank') ~ '^[0-9]+$')
+            then (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank')::int
+          else null
+        end as player_rank,
+        case
+          when ((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank') ~ '^[0-9]+$')
+            then (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank')::int
+          else null
+        end as opponent_rank,
         r.created_at,
         (${includePlayerSideExpr}) as include_player_side,
         (${includeOpponentSideExpr}) as include_opponent_side
@@ -418,6 +429,27 @@ export async function GET(req) {
       union
       select distinct toy_name from combined_toy_end
     ),
+    pack_rank_agg as (
+      select
+        pr.pack,
+        avg(pr.rank::float8) as avg_rank
+      from (
+        select b.pack as pack, b.player_rank as rank
+        from base b
+        where b.include_player_side
+          and b.match_type != 'private'
+          and b.player_rank is not null
+
+        union all
+
+        select b.opponent_pack as pack, b.opponent_rank as rank
+        from base b
+        where b.include_opponent_side
+          and b.match_type != 'private'
+          and b.opponent_rank is not null
+      ) pr
+      group by pr.pack
+    ),
     pack_stats_agg as (
       select
         cp.pack as pack,
@@ -427,9 +459,11 @@ export async function GET(req) {
           when cp.side = 'opponent' and cp.outcome = 2 then 1
           else 0
         end)::int as wins,
-        sum((cp.outcome = 3)::int)::int as draws
+        sum((cp.outcome = 3)::int)::int as draws,
+        pra.avg_rank
       from combined_pack cp
-      group by cp.pack
+      left join pack_rank_agg pra on pra.pack = cp.pack
+      group by cp.pack, pra.avg_rank
     ),
     pet_any_agg as (
       select
@@ -567,6 +601,17 @@ export async function GET(req) {
         r.id,
         r.pack,
         r.opponent_pack,
+        r.match_type,
+        case
+          when ((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank') ~ '^[0-9]+$')
+            then (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank')::int
+          else null
+        end as player_rank,
+        case
+          when ((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank') ~ '^[0-9]+$')
+            then (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank')::int
+          else null
+        end as opponent_rank,
         r.created_at,
         (${includePlayerSideExpr}) as include_player_side,
         (${includeOpponentSideExpr}) as include_opponent_side
@@ -636,6 +681,27 @@ export async function GET(req) {
       where p.toy is not null ${toyClause}
       and ((p.side = 'player' and b.include_player_side) or (p.side = 'opponent' and b.include_opponent_side))
       group by tb.turn_id, p.toy, tb.outcome, p.side
+    ),
+    pack_rank_agg as (
+      select
+        pr.pack,
+        avg(pr.rank::float8) as avg_rank
+      from (
+        select b.pack as pack, b.player_rank as rank
+        from base b
+        where b.include_player_side
+          and b.match_type != 'private'
+          and b.player_rank is not null
+
+        union all
+
+        select b.opponent_pack as pack, b.opponent_rank as rank
+        from base b
+        where b.include_opponent_side
+          and b.match_type != 'private'
+          and b.opponent_rank is not null
+      ) pr
+      group by pr.pack
     )
     select
       (select count(*) from turns_base) as total_games,
@@ -650,9 +716,11 @@ export async function GET(req) {
             when pr.side = 'opponent' and pr.outcome = 2 then 1
             else 0
           end)::int as wins,
-          sum(case when pr.outcome = 3 then 1 else 0 end)::int as draws
+          sum(case when pr.outcome = 3 then 1 else 0 end)::int as draws,
+          pra.avg_rank
         from pack_rounds pr
-        group by pr.pack
+        left join pack_rank_agg pra on pra.pack = pr.pack
+        group by pr.pack, pra.avg_rank
         order by pr.pack
       ) cps) as pack_stats,
       (select coalesce(json_agg(row_to_json(pet_stats)), '[]'::json) from (

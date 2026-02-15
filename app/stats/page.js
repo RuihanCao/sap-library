@@ -1113,6 +1113,9 @@ export default function StatsPage() {
             const wins = Number(row.wins || 0);
             const draws = Number(row.draws || 0);
             const losses = Math.max(0, games - wins - draws);
+            const avgRankValue = Number(row.avg_rank);
+            const avgRankLabel =
+              Number.isFinite(avgRankValue) && avgRankValue > 0 ? avgRankValue.toFixed(1) : "-";
             return (
               <div className="stats-card" key={row.pack}>
                 <div className="stats-card-head">
@@ -1128,6 +1131,7 @@ export default function StatsPage() {
                   <div>Pack Share: {formatPct(totalPackEntries ? games / totalPackEntries : 0)}</div>
                   <div className="rate-win">Winrate: {formatPct(games ? wins / games : 0)}</div>
                   <div className="rate-loss">Lossrate: {formatPct(games ? losses / games : 0)}</div>
+                  <div>Avg Rank (non-private): {avgRankLabel}</div>
                   {filters.scope === "battle" ? (
                     <div>Drawrate: {formatPct(games ? draws / games : 0)}</div>
                   ) : null}
