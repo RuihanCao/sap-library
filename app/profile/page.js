@@ -105,7 +105,6 @@ const THEMES = {
 const DEFAULT_FILTERS = {
   scope: "game",
   version: "current",
-  season: "",
   opponentName: "",
   lobbyCode: "",
   matchType: "any",
@@ -231,8 +230,7 @@ export default function ProfilePage() {
     toys: [],
     packs: [],
     versions: [],
-    currentVersion: null,
-    seasons: []
+    currentVersion: null
   });
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
   const [query, setQuery] = useState("");
@@ -278,8 +276,7 @@ export default function ProfilePage() {
         toys: data.toys || [],
         packs: data.packs || [],
         versions: data.versions || [],
-        currentVersion: data.currentVersion || null,
-        seasons: data.seasons || []
+        currentVersion: data.currentVersion || null
       }))
       .catch(() =>
         setMeta({
@@ -288,8 +285,7 @@ export default function ProfilePage() {
           toys: [],
           packs: [],
           versions: [],
-          currentVersion: null,
-          seasons: []
+          currentVersion: null
         })
       );
   }, []);
@@ -323,7 +319,6 @@ export default function ProfilePage() {
     const params = new URLSearchParams();
     params.set("scope", nextFilters.scope || "game");
     if (nextFilters.version) params.set("version", nextFilters.version);
-    if (nextFilters.season) params.set("season", nextFilters.season);
     if (nextFilters.opponentName) params.set("opponentName", nextFilters.opponentName);
     if (nextFilters.lobbyCode) params.set("lobbyCode", nextFilters.lobbyCode);
     if (nextFilters.matchType && nextFilters.matchType !== "any") params.set("matchType", nextFilters.matchType);
@@ -347,7 +342,6 @@ export default function ProfilePage() {
     const params = new URLSearchParams();
     if (playerIdValue) params.set("playerId", playerIdValue);
     if (nextFilters.version) params.set("version", nextFilters.version);
-    if (nextFilters.season) params.set("season", nextFilters.season);
     if (nextFilters.opponentName) params.set("opponentName", nextFilters.opponentName);
     if (nextFilters.lobbyCode) params.set("lobbyCode", nextFilters.lobbyCode);
     if (nextFilters.matchType && nextFilters.matchType !== "any") params.set("matchType", nextFilters.matchType);
@@ -681,7 +675,6 @@ export default function ProfilePage() {
       ...DEFAULT_FILTERS,
       scope: params.get("scope") === "battle" ? "battle" : "game",
       version: params.get("version") || "current",
-      season: params.get("season") || "",
       opponentName: params.get("opponentName") || "",
       lobbyCode: params.get("lobbyCode") || "",
       matchType: params.get("matchType") || "any",
@@ -1019,17 +1012,6 @@ export default function ProfilePage() {
                 {(meta.versions || []).map((version) => (
                   <option key={version} value={version}>
                     {version}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="field">
-              <label>Season (if different)</label>
-              <select value={filters.season} onChange={(e) => setFilters({ ...filters, season: e.target.value })}>
-                <option value="">Any</option>
-                {(meta.seasons || []).map((season) => (
-                  <option key={season} value={season}>
-                    {season}
                   </option>
                 ))}
               </select>
