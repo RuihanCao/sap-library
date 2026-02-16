@@ -50,6 +50,7 @@ Open `http://localhost:3000`.
 - `POST /api/replays` with `{ "participationId": "..." }` to ingest a replay
 - `GET /api/search?player=...&pack=...&pet=...&perk=...&turn=...` to search
 - `GET /api/replays/:id/image` to render a replay image
+- `GET /api/replays/:id/turns` to fetch full turn-level data (turn stats + pets by side/turn)
 
 ## Notes
 
