@@ -37,9 +37,22 @@ export async function GET(req) {
   const { searchParams } = new URL(req.url);
   const pack = searchParams.get("pack") || "";
   const opponentPack = searchParams.get("opponentPack") || "";
+  const excludePack = searchParams.get("excludePack") || "";
   const excludeMirrors = searchParams.get("excludeMirrors") === "true";
   const player = searchParams.get("player") || "";
   const playerId = searchParams.get("playerId") || "";
+  const minEloRaw = searchParams.get("minElo");
+  const maxEloRaw = searchParams.get("maxElo");
+  const minElo = minEloRaw !== null && minEloRaw !== "" && Number.isFinite(Number(minEloRaw))
+    ? Number(minEloRaw)
+    : null;
+  const maxElo = maxEloRaw !== null && maxEloRaw !== "" && Number.isFinite(Number(maxEloRaw))
+    ? Number(maxEloRaw)
+    : null;
+  const minSampleRaw = searchParams.get("minSample");
+  const minSample = minSampleRaw !== null && minSampleRaw !== "" && Number.isFinite(Number(minSampleRaw))
+    ? Math.max(0, Number(minSampleRaw))
+    : 10;
   const minTurnRaw = searchParams.get("minTurn");
   const maxTurnRaw = searchParams.get("maxTurn");
   const minTurn = minTurnRaw !== null && minTurnRaw !== "" && Number.isFinite(Number(minTurnRaw))
@@ -62,6 +75,22 @@ export async function GET(req) {
   const tags = parseList(searchParams.get("tags"));
   const versionFilterRaw = searchParams.get("version");
   const { versions } = await resolveVersionFilter(pool, versionFilterRaw);
+  const playerRankExpr = `coalesce(
+    r.player_rank,
+    case
+      when ((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank') ~ '^[0-9]+$')
+        then (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank')::int
+      else null
+    end
+  )`;
+  const opponentRankExpr = `coalesce(
+    r.opponent_rank,
+    case
+      when ((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank') ~ '^[0-9]+$')
+        then (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank')::int
+      else null
+    end
+  )`;
 
   const values = [];
   let playerNameIndex = null;
@@ -90,8 +119,31 @@ export async function GET(req) {
     values.push(opponentPack);
     clauses.push(`(r.pack = $${values.length} or r.opponent_pack = $${values.length})`);
   }
+  if (excludePack) {
+    values.push(excludePack);
+    clauses.push(`(r.pack <> $${values.length} and r.opponent_pack <> $${values.length})`);
+  }
   if (excludeMirrors) {
     clauses.push(`r.pack <> r.opponent_pack`);
+  }
+  if (minElo !== null || maxElo !== null) {
+    let minEloIndex = null;
+    let maxEloIndex = null;
+    if (minElo !== null) {
+      values.push(minElo);
+      minEloIndex = values.length;
+    }
+    if (maxElo !== null) {
+      values.push(maxElo);
+      maxEloIndex = values.length;
+    }
+    const buildRankRangeClause = (expr) => {
+      const parts = [];
+      if (minEloIndex !== null) parts.push(`${expr} >= $${minEloIndex}`);
+      if (maxEloIndex !== null) parts.push(`${expr} <= $${maxEloIndex}`);
+      return `(${parts.join(" and ")})`;
+    };
+    clauses.push(`(${buildRankRangeClause(playerRankExpr)} or ${buildRankRangeClause(opponentRankExpr)})`);
   }
   if (player) {
     values.push(`%${player}%`);
@@ -197,22 +249,9 @@ export async function GET(req) {
         r.pack,
         r.opponent_pack,
         r.match_type,
-        coalesce(
-          r.player_rank,
-          case
-            when ((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank') ~ '^[0-9]+$')
-              then (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank')::int
-            else null
-          end
-        ) as player_rank,
-        coalesce(
-          r.opponent_rank,
-          case
-            when ((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank') ~ '^[0-9]+$')
-              then (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank')::int
-            else null
-          end
-        ) as opponent_rank,
+        ${playerRankExpr} as player_rank,
+        ${opponentRankExpr} as opponent_rank,
+        (r.pack = r.opponent_pack) as is_mirror,
         r.created_at,
         (${includePlayerSideExpr}) as include_player_side,
         (${includeOpponentSideExpr}) as include_opponent_side
@@ -348,6 +387,7 @@ export async function GET(req) {
         b.id,
         b.pack as pack,
         o.outcome as outcome,
+        b.is_mirror,
         'player'::text as side
       from base b
       join outcomes o on o.replay_id = b.id
@@ -357,6 +397,7 @@ export async function GET(req) {
         b.id,
         b.opponent_pack as pack,
         o.outcome as outcome,
+        b.is_mirror,
         'opponent'::text as side
       from base b
       join outcomes o on o.replay_id = b.id
@@ -474,6 +515,14 @@ export async function GET(req) {
           else 0
         end)::int as wins,
         sum((cp.outcome = 3)::int)::int as draws,
+        sum((not cp.is_mirror)::int)::int as rate_games,
+        sum(case
+          when cp.is_mirror then 0
+          when cp.side = 'player' and cp.outcome = 1 then 1
+          when cp.side = 'opponent' and cp.outcome = 2 then 1
+          else 0
+        end)::int as rate_wins,
+        sum(case when (not cp.is_mirror) and cp.outcome = 3 then 1 else 0 end)::int as rate_draws,
         pra.avg_rank
       from combined_pack cp
       left join pack_rank_agg pra on pra.pack = cp.pack
@@ -603,10 +652,10 @@ export async function GET(req) {
       (select count(*) from base) as total_games,
       (select count(*) from turns t join base b on b.id = t.replay_id) as total_battles,
       (select max(created_at) from base) as newest_entry_at,
-      (select coalesce(json_agg(row_to_json(ps) order by ps.pack), '[]'::json) from pack_stats_agg ps) as pack_stats,
-      (select coalesce(json_agg(row_to_json(ps) order by ps.games_with desc, ps.pet_name asc), '[]'::json) from pet_stats_agg ps) as pet_stats,
-      (select coalesce(json_agg(row_to_json(ps) order by ps.games_with desc, ps.perk_name asc), '[]'::json) from perk_stats_agg ps) as perk_stats,
-      (select coalesce(json_agg(row_to_json(ts) order by ts.games_with desc, ts.toy_name asc), '[]'::json) from toy_stats_agg ts) as toy_stats
+      (select coalesce(json_agg(row_to_json(ps) order by ps.pack), '[]'::json) from pack_stats_agg ps where ps.rate_games >= $MIN_SAMPLE_SIZE) as pack_stats,
+      (select coalesce(json_agg(row_to_json(ps) order by ps.games_with desc, ps.pet_name asc), '[]'::json) from pet_stats_agg ps where ps.games_with >= $MIN_SAMPLE_SIZE) as pet_stats,
+      (select coalesce(json_agg(row_to_json(ps) order by ps.games_with desc, ps.perk_name asc), '[]'::json) from perk_stats_agg ps where ps.games_with >= $MIN_SAMPLE_SIZE) as perk_stats,
+      (select coalesce(json_agg(row_to_json(ts) order by ts.games_with desc, ts.toy_name asc), '[]'::json) from toy_stats_agg ts where ts.games_with >= $MIN_SAMPLE_SIZE) as toy_stats
   `;
 
   const battleSql = `
@@ -616,22 +665,9 @@ export async function GET(req) {
         r.pack,
         r.opponent_pack,
         r.match_type,
-        coalesce(
-          r.player_rank,
-          case
-            when ((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank') ~ '^[0-9]+$')
-              then (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank')::int
-            else null
-          end
-        ) as player_rank,
-        coalesce(
-          r.opponent_rank,
-          case
-            when ((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank') ~ '^[0-9]+$')
-              then (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank')::int
-            else null
-          end
-        ) as opponent_rank,
+        ${playerRankExpr} as player_rank,
+        ${opponentRankExpr} as opponent_rank,
+        (r.pack = r.opponent_pack) as is_mirror,
         r.created_at,
         (${includePlayerSideExpr}) as include_player_side,
         (${includeOpponentSideExpr}) as include_opponent_side
@@ -653,12 +689,12 @@ export async function GET(req) {
       ${opponentToyTurnFilter}
     ),
     pack_rounds as (
-      select tb.turn_id, b.pack as pack, 'player'::text as side, tb.outcome
+      select tb.turn_id, b.pack as pack, 'player'::text as side, tb.outcome, b.is_mirror
       from turns_base tb
       join base b on b.id = tb.replay_id
       where b.include_player_side
       union all
-      select tb.turn_id, b.opponent_pack as pack, 'opponent'::text as side, tb.outcome
+      select tb.turn_id, b.opponent_pack as pack, 'opponent'::text as side, tb.outcome, b.is_mirror
       from turns_base tb
       join base b on b.id = tb.replay_id
       where b.include_opponent_side
@@ -737,10 +773,19 @@ export async function GET(req) {
             else 0
           end)::int as wins,
           sum(case when pr.outcome = 3 then 1 else 0 end)::int as draws,
+          sum((not pr.is_mirror)::int)::int as rate_games,
+          sum(case
+            when pr.is_mirror then 0
+            when pr.side = 'player' and pr.outcome = 1 then 1
+            when pr.side = 'opponent' and pr.outcome = 2 then 1
+            else 0
+          end)::int as rate_wins,
+          sum(case when (not pr.is_mirror) and pr.outcome = 3 then 1 else 0 end)::int as rate_draws,
           pra.avg_rank
         from pack_rounds pr
         left join pack_rank_agg pra on pra.pack = pr.pack
         group by pr.pack, pra.avg_rank
+        having sum((not pr.is_mirror)::int) >= $MIN_SAMPLE_SIZE
         order by pr.pack
       ) cps) as pack_stats,
       (select coalesce(json_agg(row_to_json(pet_stats)), '[]'::json) from (
@@ -755,6 +800,7 @@ export async function GET(req) {
           sum(case when pr.outcome = 3 then 1 else 0 end)::int as draws_with
         from pet_rounds pr
         group by pr.pet_name
+        having count(*) >= $MIN_SAMPLE_SIZE
         order by count(*) desc, pr.pet_name asc
       ) pet_stats) as pet_stats,
       (select coalesce(json_agg(row_to_json(perk_stats)), '[]'::json) from (
@@ -769,6 +815,7 @@ export async function GET(req) {
           sum(case when pr.outcome = 3 then 1 else 0 end)::int as draws_with
         from perk_rounds pr
         group by pr.perk_name
+        having count(*) >= $MIN_SAMPLE_SIZE
         order by count(*) desc, pr.perk_name asc
       ) perk_stats) as perk_stats,
       (select coalesce(json_agg(row_to_json(toy_stats)), '[]'::json) from (
@@ -783,6 +830,7 @@ export async function GET(req) {
           sum(case when tr.outcome = 3 then 1 else 0 end)::int as draws_with
         from toy_rounds tr
         group by tr.toy_name
+        having count(*) >= $MIN_SAMPLE_SIZE
         order by count(*) desc, tr.toy_name asc
       ) toy_stats) as toy_stats
   `;
@@ -838,6 +886,7 @@ export async function GET(req) {
   bindToken("$OPP_PERK", opponentPerk.length ? opponentPerk : null);
   bindToken("$ALLY_TOY", allyToy.length ? allyToy : null);
   bindToken("$OPP_TOY", opponentToy.length ? opponentToy : null);
+  bindToken("$MIN_SAMPLE_SIZE", minSample);
   if (minTurn !== null) {
     const minTurnIndex = finalValues.length + 1;
     sql = sql.replace(/\$MIN_TURN/g, `$${minTurnIndex}`);

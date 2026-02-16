@@ -180,7 +180,11 @@ const DEFAULT_STATS_FILTERS = {
   version: "current",
   pack: "",
   opponentPack: "",
+  excludePack: "",
   excludeMirrors: false,
+  minSample: "10",
+  minElo: "",
+  maxElo: "",
   itemPack: "",
   minTurn: "",
   maxTurn: "",
@@ -459,7 +463,11 @@ export default function StatsPage() {
     if (nextFilters.version) params.set("version", nextFilters.version);
     if (nextFilters.pack) params.set("pack", nextFilters.pack);
     if (nextFilters.opponentPack) params.set("opponentPack", nextFilters.opponentPack);
+    if (nextFilters.excludePack) params.set("excludePack", nextFilters.excludePack);
     if (nextFilters.excludeMirrors) params.set("excludeMirrors", "true");
+    if (nextFilters.minSample) params.set("minSample", nextFilters.minSample);
+    if (nextFilters.minElo) params.set("minElo", nextFilters.minElo);
+    if (nextFilters.maxElo) params.set("maxElo", nextFilters.maxElo);
     if (nextFilters.itemPack) params.set("itemPack", nextFilters.itemPack);
     if (nextFilters.minTurn) params.set("minTurn", nextFilters.minTurn);
     if (nextFilters.maxTurn) params.set("maxTurn", nextFilters.maxTurn);
@@ -532,7 +540,11 @@ export default function StatsPage() {
       version: urlParams.get("version") || "current",
       pack: urlParams.get("pack") || "",
       opponentPack: urlParams.get("opponentPack") || "",
+      excludePack: urlParams.get("excludePack") || "",
       excludeMirrors: urlParams.get("excludeMirrors") === "true",
+      minSample: urlParams.get("minSample") || "10",
+      minElo: urlParams.get("minElo") || "",
+      maxElo: urlParams.get("maxElo") || "",
       itemPack: urlParams.get("itemPack") || "",
       minTurn: urlParams.get("minTurn") || "",
       maxTurn: urlParams.get("maxTurn") || "",
@@ -916,6 +928,15 @@ export default function StatsPage() {
             </select>
           </div>
           <div className="field">
+            <label>Exclude Pack</label>
+            <select value={filters.excludePack} onChange={(e) => setFilters({ ...filters, excludePack: e.target.value })}>
+              <option value="">None</option>
+              {packOptions.map((pack) => (
+                <option key={`exclude-${pack.id}`} value={pack.name}>{pack.name}</option>
+              ))}
+            </select>
+          </div>
+          <div className="field">
             <label>Exclude Mirrors</label>
             <select
               value={filters.excludeMirrors ? "yes" : "no"}
@@ -924,6 +945,36 @@ export default function StatsPage() {
               <option value="no">No</option>
               <option value="yes">Yes</option>
             </select>
+          </div>
+          <div className="field">
+            <label>Min Sample Size</label>
+            <input
+              type="number"
+              min="0"
+              placeholder="10"
+              value={filters.minSample}
+              onChange={(e) => setFilters({ ...filters, minSample: e.target.value })}
+            />
+          </div>
+          <div className="field">
+            <label>Min Elo</label>
+            <input
+              type="number"
+              min="0"
+              placeholder="Any"
+              value={filters.minElo}
+              onChange={(e) => setFilters({ ...filters, minElo: e.target.value })}
+            />
+          </div>
+          <div className="field">
+            <label>Max Elo</label>
+            <input
+              type="number"
+              min="0"
+              placeholder="Any"
+              value={filters.maxElo}
+              onChange={(e) => setFilters({ ...filters, maxElo: e.target.value })}
+            />
           </div>
           <div className="field">
             <label>Item Pack Group</label>
@@ -1112,7 +1163,10 @@ export default function StatsPage() {
             const games = Number(row.games || 0);
             const wins = Number(row.wins || 0);
             const draws = Number(row.draws || 0);
-            const losses = Math.max(0, games - wins - draws);
+            const rateGames = Number(row.rate_games ?? games);
+            const rateWins = Number(row.rate_wins ?? wins);
+            const rateDraws = Number(row.rate_draws ?? draws);
+            const rateLosses = Math.max(0, rateGames - rateWins - rateDraws);
             const avgRankValue = Number(row.avg_rank);
             const avgRankLabel =
               Number.isFinite(avgRankValue) && avgRankValue > 0 ? avgRankValue.toFixed(1) : "-";
@@ -1129,11 +1183,11 @@ export default function StatsPage() {
                 </div>
                 <div className="stats-card-metrics">
                   <div>Pack Share: {formatPct(totalPackEntries ? games / totalPackEntries : 0)}</div>
-                  <div className="rate-win">Winrate: {formatPct(games ? wins / games : 0)}</div>
-                  <div className="rate-loss">Lossrate: {formatPct(games ? losses / games : 0)}</div>
+                  <div className="rate-win">Winrate (No Mirrors): {formatPct(rateGames ? rateWins / rateGames : 0)}</div>
+                  <div className="rate-loss">Lossrate (No Mirrors): {formatPct(rateGames ? rateLosses / rateGames : 0)}</div>
                   <div>Avg Rank (non-private): {avgRankLabel}</div>
                   {filters.scope === "battle" ? (
-                    <div>Drawrate: {formatPct(games ? draws / games : 0)}</div>
+                    <div>Drawrate (No Mirrors): {formatPct(rateGames ? rateDraws / rateGames : 0)}</div>
                   ) : null}
                 </div>
               </div>
