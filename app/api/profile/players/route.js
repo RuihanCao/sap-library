@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { pool } from "@/lib/db";
+import { ensureHiddenPlayersTable, hiddenReplayClause } from "@/lib/hiddenPlayers";
 import { resolveVersionFilter } from "@/lib/versionFilter";
 
 export const runtime = "nodejs";
@@ -12,6 +13,7 @@ function parseLimit(rawValue, fallback = 10) {
 }
 
 export async function GET(req) {
+  await ensureHiddenPlayersTable(pool);
   const { searchParams } = new URL(req.url);
   const query = (searchParams.get("q") || searchParams.get("query") || "").trim();
   const limit = parseLimit(searchParams.get("limit"), 10);
@@ -23,6 +25,9 @@ export async function GET(req) {
   }
 
   const values = [`%${query}%`, limit, versions?.length ? versions : null];
+  const replayPlayerIdExpr = `coalesce(r.player_id, nullif(r.raw_json->>'UserId', ''))`;
+  const replayOpponentIdExpr = `coalesce(r.opponent_id, nullif((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'UserId'), ''))`;
+  const hiddenClause = hiddenReplayClause(replayPlayerIdExpr, replayOpponentIdExpr);
 
   const sql = `
     with source_rows as (
@@ -32,6 +37,7 @@ export async function GET(req) {
         r.created_at
       from replays r
       where r.match_type != 'arena'
+        and ${hiddenClause}
         and ($3::text[] is null or r.game_version = any($3::text[]))
 
       union all
@@ -42,6 +48,7 @@ export async function GET(req) {
         r.created_at
       from replays r
       where r.match_type != 'arena'
+        and ${hiddenClause}
         and ($3::text[] is null or r.game_version = any($3::text[]))
     ),
     cleaned as (

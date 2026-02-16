@@ -58,6 +58,13 @@ create table if not exists pets (
   toy text
 );
 
+create table if not exists hidden_players (
+  player_id text primary key,
+  reason text,
+  hidden_by text,
+  hidden_at timestamptz not null default now()
+);
+
 create index if not exists idx_replays_participation_id on replays(participation_id);
 create unique index if not exists idx_replays_match_id_unique on replays(match_id) where match_id is not null;
 create index if not exists idx_replays_match_id on replays(match_id);
@@ -87,3 +94,4 @@ create index if not exists idx_pets_replay_turn_side_pet on pets(replay_id, turn
 create index if not exists idx_pets_replay_turn_side_perk on pets(replay_id, turn_number, side, perk) where perk is not null;
 create index if not exists idx_pets_replay_turn_side_toy on pets(replay_id, turn_number, side, toy) where toy is not null;
 create index if not exists idx_replays_stats_scope on replays(match_type, pack, opponent_pack, created_at desc);
+create index if not exists idx_hidden_players_hidden_at on hidden_players(hidden_at desc);

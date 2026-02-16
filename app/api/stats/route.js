@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { pool } from "@/lib/db";
+import { ensureHiddenPlayersTable, hiddenReplayClause } from "@/lib/hiddenPlayers";
 import { resolveVersionFilter } from "@/lib/versionFilter";
 
 export const runtime = "nodejs";
@@ -23,6 +24,7 @@ function parseList(value) {
 }
 
 export async function GET(req) {
+  await ensureHiddenPlayersTable(pool);
   const cacheKey = req.url;
   const cacheHit = statsResponseCache.get(cacheKey);
   if (cacheHit && Date.now() - cacheHit.timestamp < STATS_CACHE_TTL_MS) {
@@ -75,6 +77,9 @@ export async function GET(req) {
   const tags = parseList(searchParams.get("tags"));
   const versionFilterRaw = searchParams.get("version");
   const { versions } = await resolveVersionFilter(pool, versionFilterRaw);
+  const replayPlayerIdExpr = `coalesce(r.player_id, nullif(r.raw_json->>'UserId', ''))`;
+  const replayOpponentIdExpr = `coalesce(r.opponent_id, nullif((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'UserId'), ''))`;
+  const hiddenClause = hiddenReplayClause(replayPlayerIdExpr, replayOpponentIdExpr);
   const playerRankExpr = `coalesce(
     r.player_rank,
     case
@@ -100,6 +105,7 @@ export async function GET(req) {
     `r.match_type != 'arena'`,
     `r.pack is not null`,
     `r.opponent_pack is not null`,
+    hiddenClause,
     `r.pack != all($${values.length + 1})`,
     `r.opponent_pack != all($${values.length + 1})`
   ];

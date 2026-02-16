@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { pool } from "@/lib/db";
+import { ensureHiddenPlayersTable, hiddenReplayClause } from "@/lib/hiddenPlayers";
 import { resolveVersionFilter } from "@/lib/versionFilter";
 
 export const runtime = "nodejs";
@@ -71,6 +72,7 @@ function extractParticipationId(input) {
 }
 
 export async function GET(req) {
+  await ensureHiddenPlayersTable(pool);
   const { searchParams } = new URL(req.url);
   const player = searchParams.get("player");
   const playerId = searchParams.get("playerId");
@@ -169,6 +171,7 @@ export async function GET(req) {
   const values = [];
   const playerIdExpr = `coalesce(r.player_id, nullif(r.raw_json->>'UserId', ''))`;
   const opponentIdExpr = `coalesce(r.opponent_id, nullif((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'UserId'), ''))`;
+  clauses.push(hiddenReplayClause(playerIdExpr, opponentIdExpr));
   const { versions } = await resolveVersionFilter(pool, versionFilterRaw);
   let playerIdExactParamIndex = null;
 

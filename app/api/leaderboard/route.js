@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { pool } from "@/lib/db";
+import { ensureHiddenPlayersTable, hiddenReplayClause } from "@/lib/hiddenPlayers";
 import { resolveVersionFilter } from "@/lib/versionFilter";
 
 export const runtime = "nodejs";
@@ -32,6 +33,9 @@ function parseNullableInt(value) {
 }
 
 function buildBaseCte() {
+  const replayPlayerIdExpr = `coalesce(r.player_id, nullif(r.raw_json->>'UserId', ''))`;
+  const replayOpponentIdExpr = `coalesce(r.opponent_id, nullif((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'UserId'), ''))`;
+  const hiddenClause = hiddenReplayClause(replayPlayerIdExpr, replayOpponentIdExpr);
   return `
     with replay_base as (
       select
@@ -48,6 +52,7 @@ function buildBaseCte() {
       where r.match_type != 'arena'
         and r.pack is not null
         and r.opponent_pack is not null
+        and ${hiddenClause}
         and r.pack != all($1::text[])
         and r.opponent_pack != all($1::text[])
         and ($2::text[] is null or coalesce(r.tags, '{}'::text[]) && $2::text[])
@@ -382,6 +387,7 @@ function buildBattleSql(orderBy) {
 }
 
 export async function GET(req) {
+  await ensureHiddenPlayersTable(pool);
   const { searchParams } = new URL(req.url);
   const scope = (searchParams.get("scope") || "game").toLowerCase() === "battle" ? "battle" : "game";
   const search = searchParams.get("search")?.trim() || "";
