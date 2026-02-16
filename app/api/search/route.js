@@ -76,6 +76,10 @@ export async function GET(req) {
   const playerId = searchParams.get("playerId");
   const pid = extractParticipationId(searchParams.get("pid"));
   const opponent = searchParams.get("opponent");
+  const opponentName = searchParams.get("opponentName");
+  const seasonRaw = searchParams.get("season");
+  const season = seasonRaw ? seasonRaw.trim().toLowerCase() : "";
+  const lobbyCode = searchParams.get("lobbyCode");
   const winningPack = searchParams.get("winningPack");
   const minRankRaw = searchParams.get("minRank");
   const minRank = minRankRaw !== null && minRankRaw !== "" && Number.isFinite(Number(minRankRaw))
@@ -129,8 +133,14 @@ export async function GET(req) {
   const summonsMaxRaw = searchParams.get("summonsMax");
   const econSide = (searchParams.get("econSide") || "either").toLowerCase();
 
-  const startDate = searchParams.get("startDate");
-  const endDate = searchParams.get("endDate");
+  const startDateRaw = searchParams.get("startDate");
+  const endDateRaw = searchParams.get("endDate");
+  const startDate = startDateRaw
+    ? (/^\d{4}-\d{2}-\d{2}$/.test(startDateRaw) ? `${startDateRaw}T00:00:00.000Z` : startDateRaw)
+    : null;
+  const endDate = endDateRaw
+    ? (/^\d{4}-\d{2}-\d{2}$/.test(endDateRaw) ? `${endDateRaw}T23:59:59.999Z` : endDateRaw)
+    : null;
 
   const turnRaw = searchParams.get("turn");
   const turnValue = turnRaw === null ? "" : String(turnRaw).trim();
@@ -157,7 +167,10 @@ export async function GET(req) {
 
   const clauses = [];
   const values = [];
+  const playerIdExpr = `coalesce(r.player_id, nullif(r.raw_json->>'UserId', ''))`;
+  const opponentIdExpr = `coalesce(r.opponent_id, nullif((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'UserId'), ''))`;
   const { versions } = await resolveVersionFilter(pool, versionFilterRaw);
+  let playerIdExactParamIndex = null;
 
   if (player) {
     values.push(`%${player}%`);
@@ -167,9 +180,10 @@ export async function GET(req) {
     values.push(playerId, `%${playerId}%`);
     const exactIdx = values.length - 1;
     const likeIdx = values.length;
+    playerIdExactParamIndex = exactIdx;
     clauses.push(`(
-      r.player_id = $${exactIdx}
-      or r.opponent_id = $${exactIdx}
+      ${playerIdExpr} = $${exactIdx}
+      or ${opponentIdExpr} = $${exactIdx}
       or (r.raw_json->>'UserId') = $${exactIdx}
       or coalesce(r.raw_json->>'GenesisModeModel', '') ilike $${likeIdx}
     )`);
@@ -183,6 +197,19 @@ export async function GET(req) {
   if (opponent) {
     values.push(`%${opponent}%`);
     clauses.push(`(r.player_name ilike $${values.length} or r.opponent_name ilike $${values.length})`);
+  }
+
+  if (opponentName) {
+    values.push(`%${opponentName}%`);
+    const opponentNameIdx = values.length;
+    if (playerIdExactParamIndex !== null) {
+      clauses.push(`(
+        (${playerIdExpr} = $${playerIdExactParamIndex} and coalesce(r.opponent_name, '') ilike $${opponentNameIdx})
+        or (${opponentIdExpr} = $${playerIdExactParamIndex} and coalesce(r.player_name, '') ilike $${opponentNameIdx})
+      )`);
+    } else {
+      clauses.push(`(coalesce(r.opponent_name, '') ilike $${opponentNameIdx} or coalesce(r.player_name, '') ilike $${opponentNameIdx})`);
+    }
   }
 
   if (minRank !== null) {
@@ -257,6 +284,20 @@ export async function GET(req) {
   if (versions?.length) {
     values.push(versions);
     clauses.push(`r.game_version = any($${values.length})`);
+  }
+
+  if (season) {
+    values.push(season);
+    clauses.push(`lower(coalesce(
+      nullif(r.raw_json->>'Season', ''),
+      nullif((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Season'), ''),
+      r.game_version
+    )) = $${values.length}`);
+  }
+
+  if (lobbyCode) {
+    values.push(`%${lobbyCode}%`);
+    clauses.push(`coalesce(r.match_name, '') ilike $${values.length}`);
   }
 
   if (winningPack) {
@@ -500,8 +541,6 @@ export async function GET(req) {
   const total = Number(countResult.rows[0]?.total || 0);
 
   values.push(pageSize, offset);
-  const playerIdExpr = `coalesce(r.player_id, nullif(r.raw_json->>'UserId', ''))`;
-  const opponentIdExpr = `coalesce(r.opponent_id, nullif((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'UserId'), ''))`;
   const playerRankFallbackExpr = `case
     when ((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank') ~ '^[0-9]+$')
       then (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank')::int

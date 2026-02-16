@@ -105,6 +105,12 @@ const THEMES = {
 const DEFAULT_FILTERS = {
   scope: "game",
   version: "current",
+  season: "",
+  opponentName: "",
+  lobbyCode: "",
+  matchType: "any",
+  startDate: "",
+  endDate: "",
   pack: "",
   opponentPack: "",
   minTurn: "",
@@ -225,7 +231,8 @@ export default function ProfilePage() {
     toys: [],
     packs: [],
     versions: [],
-    currentVersion: null
+    currentVersion: null,
+    seasons: []
   });
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
   const [query, setQuery] = useState("");
@@ -243,6 +250,7 @@ export default function ProfilePage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [modalLoading, setModalLoading] = useState(false);
   const [modalData, setModalData] = useState(null);
+  const [modalShareStatus, setModalShareStatus] = useState("");
   const [status, setStatus] = useState("");
   const gamesSentinelRef = useRef(null);
   const suggestionAbortRef = useRef(null);
@@ -270,7 +278,8 @@ export default function ProfilePage() {
         toys: data.toys || [],
         packs: data.packs || [],
         versions: data.versions || [],
-        currentVersion: data.currentVersion || null
+        currentVersion: data.currentVersion || null,
+        seasons: data.seasons || []
       }))
       .catch(() =>
         setMeta({
@@ -279,7 +288,8 @@ export default function ProfilePage() {
           toys: [],
           packs: [],
           versions: [],
-          currentVersion: null
+          currentVersion: null,
+          seasons: []
         })
       );
   }, []);
@@ -313,6 +323,12 @@ export default function ProfilePage() {
     const params = new URLSearchParams();
     params.set("scope", nextFilters.scope || "game");
     if (nextFilters.version) params.set("version", nextFilters.version);
+    if (nextFilters.season) params.set("season", nextFilters.season);
+    if (nextFilters.opponentName) params.set("opponentName", nextFilters.opponentName);
+    if (nextFilters.lobbyCode) params.set("lobbyCode", nextFilters.lobbyCode);
+    if (nextFilters.matchType && nextFilters.matchType !== "any") params.set("matchType", nextFilters.matchType);
+    if (nextFilters.startDate) params.set("startDate", nextFilters.startDate);
+    if (nextFilters.endDate) params.set("endDate", nextFilters.endDate);
     if (nextFilters.pack) params.set("pack", nextFilters.pack);
     if (nextFilters.opponentPack) params.set("opponentPack", nextFilters.opponentPack);
     if (nextFilters.scope === "battle") {
@@ -331,6 +347,12 @@ export default function ProfilePage() {
     const params = new URLSearchParams();
     if (playerIdValue) params.set("playerId", playerIdValue);
     if (nextFilters.version) params.set("version", nextFilters.version);
+    if (nextFilters.season) params.set("season", nextFilters.season);
+    if (nextFilters.opponentName) params.set("opponentName", nextFilters.opponentName);
+    if (nextFilters.lobbyCode) params.set("lobbyCode", nextFilters.lobbyCode);
+    if (nextFilters.matchType && nextFilters.matchType !== "any") params.set("matchType", nextFilters.matchType);
+    if (nextFilters.startDate) params.set("startDate", nextFilters.startDate);
+    if (nextFilters.endDate) params.set("endDate", nextFilters.endDate);
     if (nextFilters.pack && nextFilters.opponentPack) {
       params.set("packA", nextFilters.pack);
       params.set("packB", nextFilters.opponentPack);
@@ -445,6 +467,55 @@ export default function ProfilePage() {
 
   function closeModal() {
     setModalOpen(false);
+    setModalShareStatus("");
+  }
+
+  async function copyReplayShareLink() {
+    if (!modalData?.replay?.id) return;
+    try {
+      const url = new URL(window.location.origin);
+      url.pathname = "/";
+      url.searchParams.set("replay", modalData.replay.id);
+      await navigator.clipboard.writeText(url.toString());
+      setModalShareStatus("Replay link copied.");
+      setTimeout(() => setModalShareStatus(""), 1400);
+    } catch {
+      setModalShareStatus("Could not copy replay link.");
+      setTimeout(() => setModalShareStatus(""), 1400);
+    }
+  }
+
+  async function copyReplayCode(participationId, sideLabel = "Replay") {
+    if (!participationId) {
+      setModalShareStatus(`${sideLabel} code unavailable.`);
+      setTimeout(() => setModalShareStatus(""), 1400);
+      return;
+    }
+    try {
+      const payload = JSON.stringify({ T: 1, Pid: participationId });
+      await navigator.clipboard.writeText(payload);
+      setModalShareStatus(`${sideLabel} code copied.`);
+      setTimeout(() => setModalShareStatus(""), 1400);
+    } catch {
+      setModalShareStatus("Could not copy replay code.");
+      setTimeout(() => setModalShareStatus(""), 1400);
+    }
+  }
+
+  async function copyPlayerId(playerId) {
+    if (!playerId) {
+      setModalShareStatus("Player ID unavailable.");
+      setTimeout(() => setModalShareStatus(""), 1400);
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(playerId);
+      setModalShareStatus("Player ID copied.");
+      setTimeout(() => setModalShareStatus(""), 1400);
+    } catch {
+      setModalShareStatus("Could not copy player ID.");
+      setTimeout(() => setModalShareStatus(""), 1400);
+    }
   }
 
   async function openModal(replayId) {
@@ -452,6 +523,7 @@ export default function ProfilePage() {
     setModalOpen(true);
     setModalLoading(true);
     setModalData(null);
+    setModalShareStatus("");
     try {
       const res = await fetch(`/api/replays/${replayId}`);
       const data = await res.json();
@@ -609,6 +681,12 @@ export default function ProfilePage() {
       ...DEFAULT_FILTERS,
       scope: params.get("scope") === "battle" ? "battle" : "game",
       version: params.get("version") || "current",
+      season: params.get("season") || "",
+      opponentName: params.get("opponentName") || "",
+      lobbyCode: params.get("lobbyCode") || "",
+      matchType: params.get("matchType") || "any",
+      startDate: params.get("startDate") || "",
+      endDate: params.get("endDate") || "",
       pack: params.get("pack") || "",
       opponentPack: params.get("opponentPack") || "",
       minTurn: params.get("minTurn") || "",
@@ -805,6 +883,18 @@ export default function ProfilePage() {
                 </span>
                 <strong className="gold-text">{fixed(detail.summary?.avgGoldPerTurn)}</strong>
               </div>
+              <div className="stats-summary-item">
+                <span className="label">Total Elo Gain</span>
+                <strong className={Number(detail.summary?.totalEloGain || 0) >= 0 ? "rate-win" : "rate-loss"}>
+                  {Number(detail.summary?.totalEloGain || 0)}
+                </strong>
+              </div>
+              <div className="stats-summary-item">
+                <span className="label">Avg Elo Gain</span>
+                <strong className={Number(detail.summary?.avgEloGain || 0) >= 0 ? "rate-win" : "rate-loss"}>
+                  {fixed(detail.summary?.avgEloGain, 2)}
+                </strong>
+              </div>
             </div>
 
             <div className="leaderboard-detail-grid">
@@ -932,6 +1022,57 @@ export default function ProfilePage() {
                   </option>
                 ))}
               </select>
+            </div>
+            <div className="field">
+              <label>Season (if different)</label>
+              <select value={filters.season} onChange={(e) => setFilters({ ...filters, season: e.target.value })}>
+                <option value="">Any</option>
+                {(meta.seasons || []).map((season) => (
+                  <option key={season} value={season}>
+                    {season}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label>Match Type</label>
+              <select value={filters.matchType} onChange={(e) => setFilters({ ...filters, matchType: e.target.value })}>
+                <option value="any">Any</option>
+                <option value="ranked">Ranked</option>
+                <option value="private">Private</option>
+              </select>
+            </div>
+            <div className="field">
+              <label>Opponent Name</label>
+              <input
+                value={filters.opponentName}
+                onChange={(e) => setFilters({ ...filters, opponentName: e.target.value })}
+                placeholder="Filter by opponent"
+              />
+            </div>
+            <div className="field">
+              <label>Lobby Code</label>
+              <input
+                value={filters.lobbyCode}
+                onChange={(e) => setFilters({ ...filters, lobbyCode: e.target.value })}
+                placeholder="e.g. OWEN2"
+              />
+            </div>
+            <div className="field">
+              <label>Start Date</label>
+              <input
+                type="date"
+                value={filters.startDate}
+                onChange={(e) => setFilters({ ...filters, startDate: e.target.value })}
+              />
+            </div>
+            <div className="field">
+              <label>End Date</label>
+              <input
+                type="date"
+                value={filters.endDate}
+                onChange={(e) => setFilters({ ...filters, endDate: e.target.value })}
+              />
             </div>
             <div className="field">
               <label>Your Pack</label>
@@ -1174,9 +1315,25 @@ export default function ProfilePage() {
             <div className="modal-head">
               <h3>Replay Details</h3>
               <div className="modal-head-actions">
+                <button className="ghost" type="button" onClick={copyReplayShareLink}>Share</button>
+                <button
+                  className="ghost"
+                  type="button"
+                  onClick={() => copyReplayCode(modalData?.replay?.participation_id, "Player 1")}
+                >
+                  Copy P1 Code
+                </button>
+                <button
+                  className="ghost"
+                  type="button"
+                  onClick={() => copyReplayCode(modalData?.replay?.opponent_participation_id, "Player 2")}
+                >
+                  Copy P2 Code
+                </button>
                 <button className="ghost" type="button" onClick={closeModal}>Close</button>
               </div>
             </div>
+            {modalShareStatus ? <div className="status">{modalShareStatus}</div> : null}
             {modalLoading && <div className="muted">Loading...</div>}
             {!modalLoading && modalData?.error && <div className="muted">{modalData.error}</div>}
             {!modalLoading && modalData?.replay && (
@@ -1198,18 +1355,8 @@ export default function ProfilePage() {
                     <span>{modalData.replay.created_at ? new Date(modalData.replay.created_at).toLocaleString() : "?"}</span>
                   </div>
                   <div><span className="label">Participation</span><span>{modalData.replay.participation_id}</span></div>
-                  <div>
-                    <span className="label">
-                      <SemanticLabel type="turn">Turns</SemanticLabel>
-                    </span>
-                    <span>{modalData.stats?.turns ?? "?"}</span>
-                  </div>
-                  <div>
-                    <span className="label">
-                      <SemanticLabel type="lives">Max Lives</SemanticLabel>
-                    </span>
-                    <span>{modalData.replay.max_lives ?? "?"}</span>
-                  </div>
+                  <div><span className="label">Turns</span><span>{modalData.stats?.turns ?? "?"}</span></div>
+                  <div><span className="label">Max Lives</span><span>{modalData.replay.max_lives ?? "?"}</span></div>
                   {modalData.replay.match_name && <div><span className="label">Match Name</span><span>{modalData.replay.match_name}</span></div>}
                   {modalData.replay.match_pack !== null && modalData.replay.match_pack !== undefined && (
                     <div><span className="label">Match Pack</span><span>{modalData.replay.match_pack}</span></div>
@@ -1220,30 +1367,71 @@ export default function ProfilePage() {
                   {modalData.replay.active_player_count !== null && modalData.replay.active_player_count !== undefined && (
                     <div><span className="label">Active Players</span><span>{modalData.replay.active_player_count}</span></div>
                   )}
+                  {modalData.replay.spectator_mode !== null && modalData.replay.spectator_mode !== undefined && (
+                    <div><span className="label">Spectator Mode</span><span>{modalData.replay.spectator_mode}</span></div>
+                  )}
                 </div>
                 <div className="modal-sides">
-                  <div className={`modal-side ${modalData.stats?.last_outcome === 1 ? "winner" : modalData.stats?.last_outcome === 2 ? "loser" : ""}`}>
-                    <h4>{modalData.replay.player_name || "Unknown Player"}</h4>
+                  <div className={`modal-side ${modalData.stats?.last_outcome === 1 ? "winner" : ""}`}>
+                    <h4>
+                      <button
+                        type="button"
+                        className="player-id-copy"
+                        title={modalData.replay.player_id || "Player ID unavailable"}
+                        onClick={() => copyPlayerId(modalData.replay.player_id)}
+                      >
+                        {modalData.replay.player_name || "Unknown Player"}
+                      </button>
+                    </h4>
+                    <div className="stat">
+                      <span className="label">Replay Code</span>
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={() => copyReplayCode(modalData.replay.participation_id, "Player 1")}
+                      >
+                        Copy
+                      </button>
+                    </div>
                     <div className="stat">
                       <span className="label">Rank</span>
                       <span>{modalData.replay.player_rank_display ?? modalData.replay.player_rank ?? "?"}</span>
                     </div>
                     <div className="stat">
-                      <span className="label gold-text">Gold Spent</span>
-                      <span className="gold-text">{modalData.stats?.player_gold_spent ?? "?"}</span>
+                      <span className="label">Gold Spent</span>
+                      <span>{modalData.stats?.player_gold_spent ?? "?"}</span>
                     </div>
                     <div className="stat"><span className="label">Rolls</span><span>{modalData.stats?.player_rolls ?? "?"}</span></div>
                   </div>
                   {!isArena(modalData.replay.match_type) && !isMulti(modalData.replay) && (
-                    <div className={`modal-side ${modalData.stats?.last_outcome === 2 ? "winner" : modalData.stats?.last_outcome === 1 ? "loser" : ""}`}>
-                      <h4>{modalData.replay.opponent_name || "Unknown"}</h4>
+                    <div className={`modal-side ${modalData.stats?.last_outcome === 2 ? "winner" : ""}`}>
+                      <h4>
+                        <button
+                          type="button"
+                          className="player-id-copy"
+                          title={modalData.replay.opponent_id || "Player ID unavailable"}
+                          onClick={() => copyPlayerId(modalData.replay.opponent_id)}
+                        >
+                          {modalData.replay.opponent_name || "Unknown"}
+                        </button>
+                      </h4>
+                      <div className="stat">
+                        <span className="label">Replay Code</span>
+                        <button
+                          type="button"
+                          className="ghost"
+                          onClick={() => copyReplayCode(modalData.replay.opponent_participation_id, "Player 2")}
+                        >
+                          Copy
+                        </button>
+                      </div>
                       <div className="stat">
                         <span className="label">Rank</span>
                         <span>{modalData.replay.opponent_rank_display ?? modalData.replay.opponent_rank ?? "?"}</span>
                       </div>
                       <div className="stat">
-                        <span className="label gold-text">Gold Spent</span>
-                        <span className="gold-text">{modalData.stats?.opponent_gold_spent ?? "?"}</span>
+                        <span className="label">Gold Spent</span>
+                        <span>{modalData.stats?.opponent_gold_spent ?? "?"}</span>
                       </div>
                       <div className="stat"><span className="label">Rolls</span><span>{modalData.stats?.opponent_rolls ?? "?"}</span></div>
                     </div>

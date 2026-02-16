@@ -34,6 +34,11 @@ function buildBaseCte() {
         r.opponent_name,
         coalesce(r.player_id, nullif(r.raw_json->>'UserId', '')) as player_id,
         coalesce(r.opponent_id, nullif((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'UserId'), '')) as opponent_id,
+        coalesce(
+          nullif(r.raw_json->>'Season', ''),
+          nullif((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Season'), ''),
+          r.game_version
+        ) as season,
         coalesce(r.tags, '{}'::text[]) as tags
       from replays r
       where r.match_type != 'arena'
@@ -43,6 +48,15 @@ function buildBaseCte() {
         and r.opponent_pack != all($1::text[])
         and ($2::text[] is null or coalesce(r.tags, '{}'::text[]) && $2::text[])
         and ($11::text[] is null or r.game_version = any($11::text[]))
+        and ($12::text[] is null or lower(coalesce(r.match_type, '')) = any($12::text[]))
+        and ($13::timestamptz is null or r.created_at >= $13::timestamptz)
+        and ($14::timestamptz is null or r.created_at <= $14::timestamptz)
+        and ($15::text is null or lower(coalesce(
+          nullif(r.raw_json->>'Season', ''),
+          nullif((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Season'), ''),
+          r.game_version
+        )) = lower($15::text))
+        and ($16::text is null or coalesce(r.match_name, '') ilike $16::text)
     ),
     spotlight_base as (
       select
@@ -50,6 +64,7 @@ function buildBaseCte() {
         rb.created_at,
         rb.player_id as spotlight_id,
         rb.player_name as spotlight_name,
+        rb.opponent_name as spotlight_opponent_name,
         rb.player_pack as my_pack,
         rb.opponent_pack as opp_pack,
         'player'::text as side
@@ -63,6 +78,7 @@ function buildBaseCte() {
         rb.created_at,
         rb.opponent_id as spotlight_id,
         rb.opponent_name as spotlight_name,
+        rb.player_name as spotlight_opponent_name,
         rb.opponent_pack as my_pack,
         rb.player_pack as opp_pack,
         'opponent'::text as side
@@ -75,6 +91,7 @@ function buildBaseCte() {
       where s.spotlight_id = $10::text
         and ($3::text is null or s.my_pack = $3::text)
         and ($4::text is null or s.opp_pack = $4::text)
+        and ($17::text is null or coalesce(s.spotlight_opponent_name, '') ilike $17::text)
         and (
           $5::text[] is null or exists (
             select 1
@@ -204,6 +221,49 @@ function buildGameSql() {
       from turn_rows tr
       group by tr.turn_number
       order by tr.turn_number
+    ),
+    ranked_replays as (
+      select
+        s.replay_id,
+        s.created_at,
+        case
+          when s.side = 'player' then coalesce(
+            r.player_rank,
+            case
+              when ((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank') ~ '^[0-9]+$')
+                then (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank')::int
+              else null
+            end
+          )
+          else coalesce(
+            r.opponent_rank,
+            case
+              when ((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank') ~ '^[0-9]+$')
+                then (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank')::int
+              else null
+            end
+          )
+        end as rank
+      from spotlight_filtered s
+      join replays r on r.id = s.replay_id
+      where lower(coalesce(r.match_type, '')) = 'ranked'
+    ),
+    rank_deltas as (
+      select
+        rr.replay_id,
+        rr.created_at,
+        rr.rank,
+        rr.rank - lag(rr.rank) over (order by rr.created_at asc, rr.replay_id asc) as elo_delta
+      from ranked_replays rr
+      where rr.rank is not null
+    ),
+    elo_summary as (
+      select
+        coalesce(sum(rd.elo_delta), 0)::int as total_elo_gain,
+        case when count(rd.elo_delta) > 0 then avg(rd.elo_delta)::float8 else 0::float8 end as avg_elo_gain,
+        count(rd.elo_delta)::int as elo_sample_size
+      from rank_deltas rd
+      where rd.elo_delta is not null
     )
     select
       coalesce((
@@ -218,10 +278,14 @@ function buildGameSql() {
           'drawrate', case when s.games > 0 then s.draws::float8 / s.games::float8 else 0::float8 end,
           'avgRollsPerTurn', coalesce(ta.avg_rolls_per_turn, 0::float8),
           'avgGoldPerTurn', coalesce(ta.avg_gold_per_turn, 0::float8),
-          'avgSummonsPerTurn', coalesce(ta.avg_summons_per_turn, 0::float8)
+          'avgSummonsPerTurn', coalesce(ta.avg_summons_per_turn, 0::float8),
+          'totalEloGain', coalesce(es.total_elo_gain, 0),
+          'avgEloGain', coalesce(es.avg_elo_gain, 0::float8),
+          'eloSampleSize', coalesce(es.elo_sample_size, 0)
         )
         from summary s
         cross join turn_agg ta
+        cross join elo_summary es
       ), '{}'::json) as summary,
       coalesce((
         select json_agg(row_to_json(ps) order by ps.games desc, ps.pack asc)
@@ -301,6 +365,49 @@ function buildBattleSql() {
       from turn_rows tr
       group by tr.turn_number
       order by tr.turn_number
+    ),
+    ranked_replays as (
+      select
+        s.replay_id,
+        s.created_at,
+        case
+          when s.side = 'player' then coalesce(
+            r.player_rank,
+            case
+              when ((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank') ~ '^[0-9]+$')
+                then (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank')::int
+              else null
+            end
+          )
+          else coalesce(
+            r.opponent_rank,
+            case
+              when ((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank') ~ '^[0-9]+$')
+                then (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank')::int
+              else null
+            end
+          )
+        end as rank
+      from spotlight_filtered s
+      join replays r on r.id = s.replay_id
+      where lower(coalesce(r.match_type, '')) = 'ranked'
+    ),
+    rank_deltas as (
+      select
+        rr.replay_id,
+        rr.created_at,
+        rr.rank,
+        rr.rank - lag(rr.rank) over (order by rr.created_at asc, rr.replay_id asc) as elo_delta
+      from ranked_replays rr
+      where rr.rank is not null
+    ),
+    elo_summary as (
+      select
+        coalesce(sum(rd.elo_delta), 0)::int as total_elo_gain,
+        case when count(rd.elo_delta) > 0 then avg(rd.elo_delta)::float8 else 0::float8 end as avg_elo_gain,
+        count(rd.elo_delta)::int as elo_sample_size
+      from rank_deltas rd
+      where rd.elo_delta is not null
     )
     select
       coalesce((
@@ -315,9 +422,13 @@ function buildBattleSql() {
           'drawrate', case when s.rounds > 0 then s.draws::float8 / s.rounds::float8 else 0::float8 end,
           'avgRollsPerTurn', coalesce(s.avg_rolls_per_turn, 0::float8),
           'avgGoldPerTurn', coalesce(s.avg_gold_per_turn, 0::float8),
-          'avgSummonsPerTurn', coalesce(s.avg_summons_per_turn, 0::float8)
+          'avgSummonsPerTurn', coalesce(s.avg_summons_per_turn, 0::float8),
+          'totalEloGain', coalesce(es.total_elo_gain, 0),
+          'avgEloGain', coalesce(es.avg_elo_gain, 0::float8),
+          'eloSampleSize', coalesce(es.elo_sample_size, 0)
         )
         from summary s
+        cross join elo_summary es
       ), '{}'::json) as summary,
       coalesce((
         select json_agg(row_to_json(ps) order by ps.rounds desc, ps.pack asc)
@@ -354,10 +465,30 @@ export async function GET(req, context) {
   const pet = parseList(searchParams.get("pet"));
   const perk = parseList(searchParams.get("perk"));
   const toy = parseList(searchParams.get("toy"));
+  const matchType = Array.from(
+    new Set(
+      searchParams
+        .getAll("matchType")
+        .flatMap((value) => parseList(value))
+        .map((value) => value.toLowerCase())
+        .filter((value) => value && value !== "any")
+    )
+  );
   const minTurnRaw = parseNullableInt(searchParams.get("minTurn"));
   const maxTurnRaw = parseNullableInt(searchParams.get("maxTurn"));
   const minTurn = scope === "battle" ? minTurnRaw : null;
   const maxTurn = scope === "battle" ? maxTurnRaw : null;
+  const startDateRaw = searchParams.get("startDate");
+  const endDateRaw = searchParams.get("endDate");
+  const startDate = startDateRaw
+    ? (/^\d{4}-\d{2}-\d{2}$/.test(startDateRaw) ? `${startDateRaw}T00:00:00.000Z` : startDateRaw)
+    : null;
+  const endDate = endDateRaw
+    ? (/^\d{4}-\d{2}-\d{2}$/.test(endDateRaw) ? `${endDateRaw}T23:59:59.999Z` : endDateRaw)
+    : null;
+  const season = searchParams.get("season") || null;
+  const lobbyCode = searchParams.get("lobbyCode") ? `%${searchParams.get("lobbyCode")}%` : null;
+  const opponentName = searchParams.get("opponentName") ? `%${searchParams.get("opponentName")}%` : null;
   const { versions } = await resolveVersionFilter(pool, searchParams.get("version"));
 
   const values = [
@@ -371,7 +502,13 @@ export async function GET(req, context) {
     minTurn,
     maxTurn,
     playerId,
-    versions?.length ? versions : null
+    versions?.length ? versions : null,
+    matchType.length ? matchType : null,
+    startDate,
+    endDate,
+    season,
+    lobbyCode,
+    opponentName
   ];
 
   const sql = scope === "battle" ? buildBattleSql() : buildGameSql();

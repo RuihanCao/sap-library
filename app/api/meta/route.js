@@ -109,16 +109,33 @@ export async function GET() {
 
   let versions = [];
   let currentVersion = null;
+  let seasons = [];
   try {
     versions = await getAvailableVersions(pool);
     currentVersion = await getCurrentVersion(pool);
+    const seasonRes = await pool.query(`
+      select distinct lower(coalesce(
+        nullif(raw_json->>'Season', ''),
+        nullif((nullif(raw_json->>'GenesisModeModel', '')::jsonb->>'Season'), ''),
+        game_version
+      )) as season
+      from replays
+      where coalesce(
+        nullif(raw_json->>'Season', ''),
+        nullif((nullif(raw_json->>'GenesisModeModel', '')::jsonb->>'Season'), ''),
+        game_version
+      ) is not null
+      order by season desc
+    `);
+    seasons = seasonRes.rows.map((row) => row.season).filter(Boolean);
   } catch {
     versions = [];
     currentVersion = null;
+    seasons = [];
   }
 
   return NextResponse.json(
-    { pets, perks, toys, packs, versions, currentVersion },
+    { pets, perks, toys, packs, versions, currentVersion, seasons },
     {
       headers: {
         "Cache-Control": "public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800"
