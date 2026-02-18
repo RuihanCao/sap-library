@@ -342,6 +342,20 @@ export async function GET(req) {
     return clause;
   };
 
+  // Replay-length filtering: enforce overall game turn span.
+  // maxTurn means the replay cannot have any turn above that value.
+  if (minTurn !== null || maxTurn !== null) {
+    const replayLastTurnExpr = `(select max(tlen.turn_number) from turns tlen where tlen.replay_id = r.id)`;
+    if (minTurn !== null) {
+      values.push(minTurn);
+      clauses.push(`${replayLastTurnExpr} >= $${values.length}`);
+    }
+    if (maxTurn !== null) {
+      values.push(maxTurn);
+      clauses.push(`${replayLastTurnExpr} <= $${values.length}`);
+    }
+  }
+
   const addPetClause = () => {
     if (!petList.length) return false;
 
@@ -518,19 +532,11 @@ export async function GET(req) {
   addEconomyClause("player_rolls", "opponent_rolls", rollsMinRaw, rollsMaxRaw);
   addEconomyClause("player_summons", "opponent_summons", summonsMinRaw, summonsMaxRaw);
 
-  if ((turn !== null || minTurn !== null || maxTurn !== null) && !petUsedTurn && !perkUsedTurn && !toyUsedTurn) {
+  if (turn !== null && !petUsedTurn && !perkUsedTurn && !toyUsedTurn) {
     let turnClause = "";
     if (turn !== null) {
       values.push(turn);
       turnClause += ` and t.turn_number = $${values.length}`;
-    }
-    if (minTurn !== null) {
-      values.push(minTurn);
-      turnClause += ` and t.turn_number >= $${values.length}`;
-    }
-    if (maxTurn !== null) {
-      values.push(maxTurn);
-      turnClause += ` and t.turn_number <= $${values.length}`;
     }
     clauses.push(`exists (select 1 from turns t where t.replay_id = r.id${turnClause})`);
   }

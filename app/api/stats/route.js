@@ -65,6 +65,7 @@ export async function GET(req) {
     : null;
   const pet = parseList(searchParams.get("pet"));
   const petLevel = searchParams.get("petLevel") || "";
+  const petBypassesMinSample = pet.length > 0;
   const perk = parseList(searchParams.get("perk"));
   const toy = parseList(searchParams.get("toy"));
   const allyPet = parseList(searchParams.get("allyPet"));
@@ -659,7 +660,7 @@ export async function GET(req) {
       (select count(*) from turns t join base b on b.id = t.replay_id) as total_battles,
       (select max(created_at) from base) as newest_entry_at,
       (select coalesce(json_agg(row_to_json(ps) order by ps.pack), '[]'::json) from pack_stats_agg ps where ps.rate_games >= $MIN_SAMPLE_SIZE) as pack_stats,
-      (select coalesce(json_agg(row_to_json(ps) order by ps.games_with desc, ps.pet_name asc), '[]'::json) from pet_stats_agg ps where ps.games_with >= $MIN_SAMPLE_SIZE) as pet_stats,
+      (select coalesce(json_agg(row_to_json(ps) order by ps.games_with desc, ps.pet_name asc), '[]'::json) from pet_stats_agg ps where ps.games_with >= $MIN_SAMPLE_SIZE or ${petBypassesMinSample ? "true" : "false"}) as pet_stats,
       (select coalesce(json_agg(row_to_json(ps) order by ps.games_with desc, ps.perk_name asc), '[]'::json) from perk_stats_agg ps where ps.games_with >= $MIN_SAMPLE_SIZE) as perk_stats,
       (select coalesce(json_agg(row_to_json(ts) order by ts.games_with desc, ts.toy_name asc), '[]'::json) from toy_stats_agg ts where ts.games_with >= $MIN_SAMPLE_SIZE) as toy_stats
   `;
@@ -806,7 +807,7 @@ export async function GET(req) {
           sum(case when pr.outcome = 3 then 1 else 0 end)::int as draws_with
         from pet_rounds pr
         group by pr.pet_name
-        having count(*) >= $MIN_SAMPLE_SIZE
+        having count(*) >= $MIN_SAMPLE_SIZE or ${petBypassesMinSample ? "true" : "false"}
         order by count(*) desc, pr.pet_name asc
       ) pet_stats) as pet_stats,
       (select coalesce(json_agg(row_to_json(perk_stats)), '[]'::json) from (
