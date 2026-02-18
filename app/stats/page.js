@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { getPackSprite } from "@/lib/packSprites";
 import { SemanticLabel } from "@/app/components/semantic-label";
+import { PackMatchupInline } from "@/app/components/pack-inline";
 
 const BUILD_BACKGROUNDS = [
   "AboveCloudsBuild.png",
@@ -180,6 +181,8 @@ const DEFAULT_STATS_FILTERS = {
   version: "current",
   pack: "",
   opponentPack: "",
+  winningPack: "",
+  losingPack: "",
   excludePack: "",
   excludeMirrors: false,
   minSample: "10",
@@ -229,6 +232,12 @@ function formatPct(value) {
   if (!Number.isFinite(value)) return "0.00%";
   const clamped = Math.max(0, Math.min(1, value));
   return `${(clamped * 100).toFixed(2)}%`;
+}
+
+function formatTurns(value) {
+  const parsed = Number(value || 0);
+  if (!Number.isFinite(parsed)) return "0.00";
+  return parsed.toFixed(2);
 }
 
 function IconSelect({ label, options, value, onChange, placeholder }) {
@@ -377,6 +386,7 @@ export default function StatsPage() {
     generatedAt: null,
     newestEntryAt: null,
     packStats: [],
+    matchupStats: [],
     petStats: [],
     perkStats: [],
     toyStats: []
@@ -396,6 +406,7 @@ export default function StatsPage() {
   });
   const [collapsed, setCollapsed] = useState({
     pack: false,
+    matchup: false,
     pet: false,
     perk: false,
     toy: false
@@ -464,6 +475,8 @@ export default function StatsPage() {
     if (nextFilters.version) params.set("version", nextFilters.version);
     if (nextFilters.pack) params.set("pack", nextFilters.pack);
     if (nextFilters.opponentPack) params.set("opponentPack", nextFilters.opponentPack);
+    if (nextFilters.winningPack) params.set("winningPack", nextFilters.winningPack);
+    if (nextFilters.losingPack) params.set("losingPack", nextFilters.losingPack);
     if (nextFilters.excludePack) params.set("excludePack", nextFilters.excludePack);
     if (nextFilters.excludeMirrors) params.set("excludeMirrors", "true");
     if (nextFilters.minSample) params.set("minSample", nextFilters.minSample);
@@ -511,6 +524,7 @@ export default function StatsPage() {
         generatedAt: data.generatedAt || null,
         newestEntryAt: data.newestEntryAt || null,
         packStats: data.packStats || [],
+        matchupStats: data.matchupStats || [],
         petStats: data.petStats || [],
         perkStats: data.perkStats || [],
         toyStats: data.toyStats || []
@@ -542,6 +556,8 @@ export default function StatsPage() {
       version: urlParams.get("version") || "current",
       pack: urlParams.get("pack") || "",
       opponentPack: urlParams.get("opponentPack") || "",
+      winningPack: urlParams.get("winningPack") || "",
+      losingPack: urlParams.get("losingPack") || "",
       excludePack: urlParams.get("excludePack") || "",
       excludeMirrors: urlParams.get("excludeMirrors") === "true",
       minSample: urlParams.get("minSample") || "10",
@@ -757,6 +773,33 @@ export default function StatsPage() {
       return String(a.pack || "").localeCompare(String(b.pack || ""));
     });
   }, [stats.packStats]);
+  const sortedMatchupStats = useMemo(() => {
+    return [...(stats.matchupStats || [])].sort((a, b) => {
+      const gameDiff = Number(b.games || 0) - Number(a.games || 0);
+      if (gameDiff !== 0) return gameDiff;
+
+      const aRateGames = Number(a.rate_games || 0);
+      const bRateGames = Number(b.rate_games || 0);
+      const aGames = Number(a.games || 0);
+      const bGames = Number(b.games || 0);
+      const aWins = Number(a.wins || 0);
+      const bWins = Number(b.wins || 0);
+      const aWinrate = aRateGames ? Number(a.rate_wins || 0) / aRateGames : (aGames ? aWins / aGames : 0);
+      const bWinrate = bRateGames ? Number(b.rate_wins || 0) / bRateGames : (bGames ? bWins / bGames : 0);
+      if (bWinrate !== aWinrate) return bWinrate - aWinrate;
+
+      const packDiff = (packOrderMap[a.pack] ?? 999) - (packOrderMap[b.pack] ?? 999);
+      if (packDiff !== 0) return packDiff;
+
+      const opponentPackDiff = (packOrderMap[a.opponent_pack] ?? 999) - (packOrderMap[b.opponent_pack] ?? 999);
+      if (opponentPackDiff !== 0) return opponentPackDiff;
+
+      const packNameDiff = String(a.pack || "").localeCompare(String(b.pack || ""));
+      if (packNameDiff !== 0) return packNameDiff;
+
+      return String(a.opponent_pack || "").localeCompare(String(b.opponent_pack || ""));
+    });
+  }, [stats.matchupStats]);
   const sortedPetStats = useMemo(() => {
     return expandWithMeta(stats.petStats, "pet_name", petMetaMap, petSort).sort((a, b) =>
       compareRows(a, b, petSort, petOrder, stats.totalGames, "pet_name")
@@ -927,6 +970,24 @@ export default function StatsPage() {
               <option value="">Any</option>
               {packOptions.map((pack) => (
                 <option key={pack.id} value={pack.name}>{pack.name}</option>
+              ))}
+            </select>
+          </div>
+          <div className="field">
+            <label>Winning Pack</label>
+            <select value={filters.winningPack} onChange={(e) => setFilters({ ...filters, winningPack: e.target.value })}>
+              <option value="">Any</option>
+              {packOptions.map((pack) => (
+                <option key={`stats-win-${pack.id}`} value={pack.name}>{pack.name}</option>
+              ))}
+            </select>
+          </div>
+          <div className="field">
+            <label>Losing Pack</label>
+            <select value={filters.losingPack} onChange={(e) => setFilters({ ...filters, losingPack: e.target.value })}>
+              <option value="">Any</option>
+              {packOptions.map((pack) => (
+                <option key={`stats-lose-${pack.id}`} value={pack.name}>{pack.name}</option>
               ))}
             </select>
           </div>
@@ -1178,6 +1239,7 @@ export default function StatsPage() {
             const games = Number(row.games || 0);
             const wins = Number(row.wins || 0);
             const draws = Number(row.draws || 0);
+            const avgGameLength = Number(row.avg_game_length || 0);
             const rateGames = Number(row.rate_games ?? games);
             const rateWins = Number(row.rate_wins ?? wins);
             const rateDraws = Number(row.rate_draws ?? draws);
@@ -1198,6 +1260,7 @@ export default function StatsPage() {
                 </div>
                 <div className="stats-card-metrics">
                   <div>Pack Share: {formatPct(totalPackEntries ? games / totalPackEntries : 0)}</div>
+                  <div>Avg Game Length: {formatTurns(avgGameLength)} turns</div>
                   <div className="rate-win">Winrate (No Mirrors): {formatPct(rateGames ? rateWins / rateGames : 0)}</div>
                   <div className="rate-loss">Lossrate (No Mirrors): {formatPct(rateGames ? rateLosses / rateGames : 0)}</div>
                   <div>Avg Rank (non-private): {avgRankLabel}</div>
@@ -1585,6 +1648,61 @@ export default function StatsPage() {
           })}
           {stats.toyStats.length === 0 && !loading && (
             <div className="stats-card empty">No toy stats yet.</div>
+          )}
+        </div>
+        )}
+      </section>
+
+      <section className="section">
+        <div className="results-header">
+          <h2>Matchup Stats</h2>
+          <div className="results-actions">
+            <button type="button" className="ghost" onClick={() => toggleCollapsed("matchup")}>
+              {collapsed.matchup ? "Expand" : "Collapse"}
+            </button>
+          </div>
+        </div>
+        {!collapsed.matchup && (
+        <div className={statsCardsClass}>
+          {sortedMatchupStats.map((row) => {
+            const games = Number(row.games || 0);
+            const wins = Number(row.wins || 0);
+            const draws = Number(row.draws || 0);
+            const avgGameLength = Number(row.avg_game_length || 0);
+            const rateGames = Number(row.rate_games ?? games);
+            const rateWins = Number(row.rate_wins ?? wins);
+            const rateDraws = Number(row.rate_draws ?? draws);
+            const hasNoMirrorSample = rateGames > 0;
+            const effectiveGames = hasNoMirrorSample ? rateGames : games;
+            const effectiveWins = hasNoMirrorSample ? rateWins : wins;
+            const effectiveDraws = hasNoMirrorSample ? rateDraws : draws;
+            const effectiveLosses = Math.max(0, effectiveGames - effectiveWins - effectiveDraws);
+            const rateLabel = hasNoMirrorSample ? " (No Mirrors)" : "";
+            return (
+              <div className="stats-card" key={`${row.pack}-${row.opponent_pack}`}>
+                <div className="stats-card-head">
+                  <PackMatchupInline
+                    pack={row.pack}
+                    opponentPack={row.opponent_pack}
+                    className="pack-matchup-inline stats-card-pack-inline"
+                  />
+                </div>
+                <div className="stats-card-meta">
+                  <span>{filters.scope === "battle" ? "Rounds" : "Games"}: {games}</span>
+                </div>
+                <div className="stats-card-metrics">
+                  <div>Avg Turn Length: {formatTurns(avgGameLength)} turns</div>
+                  <div className="rate-win">Winrate{rateLabel}: {formatPct(effectiveGames ? effectiveWins / effectiveGames : 0)}</div>
+                  <div className="rate-loss">Lossrate{rateLabel}: {formatPct(effectiveGames ? effectiveLosses / effectiveGames : 0)}</div>
+                  {filters.scope === "battle" ? (
+                    <div>Drawrate{rateLabel}: {formatPct(effectiveGames ? effectiveDraws / effectiveGames : 0)}</div>
+                  ) : null}
+                </div>
+              </div>
+            );
+          })}
+          {stats.matchupStats.length === 0 && !loading && (
+            <div className="stats-card empty">No matchup stats yet.</div>
           )}
         </div>
         )}
