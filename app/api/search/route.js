@@ -93,7 +93,8 @@ export async function GET(req) {
   const packB = searchParams.get("packB");
   const excludeA = searchParams.get("excludeA");
   const excludeB = searchParams.get("excludeB");
-  const mirrorMatch = searchParams.get("mirrorMatch") === "true";
+  const mirrorMatch = searchParams.get("mirrorMatch") === "true"; // legacy support
+  const excludeMirrors = searchParams.get("excludeMirrors") === "true";
   const versionFilterRaw = searchParams.get("version");
   const matchTypeList = Array.from(
     new Set(
@@ -271,7 +272,9 @@ export async function GET(req) {
     );
   }
 
-  if (mirrorMatch) {
+  if (excludeMirrors) {
+    clauses.push(`r.pack is not null and r.opponent_pack is not null and r.pack <> r.opponent_pack`);
+  } else if (mirrorMatch) {
     clauses.push(`r.pack is not null and r.pack = r.opponent_pack`);
   }
 

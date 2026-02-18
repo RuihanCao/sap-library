@@ -287,9 +287,9 @@ const DEFAULT_FILTERS = {
   packB: "",
   winningPack: "",
   losingPack: "",
+  excludeMirrors: false,
   excludeA: "",
   excludeB: "",
-  mirrorMatch: false,
   petMode: "any",
   perkMode: "any",
   toyMode: "any",
@@ -515,7 +515,7 @@ export default function Page() {
       if (filtersValue.packB) params.set("packB", filtersValue.packB);
       if (filtersValue.winningPack) params.set("winningPack", filtersValue.winningPack);
       if (filtersValue.losingPack) params.set("losingPack", filtersValue.losingPack);
-      if (filtersValue.mirrorMatch) params.set("mirrorMatch", "true");
+      if (filtersValue.excludeMirrors) params.set("excludeMirrors", "true");
     }
     if (enabledValue.pets) {
       if (selectedPetsValue.length) params.set("pet", selectedPetsValue.join(","));
@@ -639,7 +639,7 @@ export default function Page() {
     assignText("order");
     assignText("pageSize");
 
-    nextFilters.mirrorMatch = urlParams.get("mirrorMatch") === "true";
+    nextFilters.excludeMirrors = urlParams.get("excludeMirrors") === "true";
 
     const nextSelectedPets = parseCsvList(urlParams.get("pet"));
     const nextSelectedPerks = parseCsvList(urlParams.get("perk"));
@@ -652,14 +652,14 @@ export default function Page() {
       }
     } else {
       nextEnabled.player = Boolean(nextFilters.player || nextFilters.playerId || nextFilters.pid || nextFilters.opponent || nextFilters.minRank);
-      nextEnabled.matchup = Boolean(nextFilters.packA || nextFilters.packB || nextFilters.winningPack || nextFilters.losingPack || nextFilters.mirrorMatch);
+      nextEnabled.matchup = Boolean(nextFilters.packA || nextFilters.packB || nextFilters.winningPack || nextFilters.losingPack || nextFilters.excludeMirrors);
       nextEnabled.pets = Boolean(nextSelectedPets.length);
       nextEnabled.perks = Boolean(nextSelectedPerks.length);
       nextEnabled.toys = Boolean(nextSelectedToys.length);
       nextEnabled.turn = Boolean(nextFilters.turn || nextFilters.minTurn || nextFilters.maxTurn);
       nextEnabled.matchType = Boolean(nextFilters.matchType && nextFilters.matchType !== "any");
     }
-    if (nextFilters.mirrorMatch) {
+    if (nextFilters.excludeMirrors) {
       nextEnabled.matchup = true;
     }
 
@@ -714,7 +714,7 @@ export default function Page() {
       const next = { ...prev, [key]: !prev[key] };
         if (!next[key]) {
         if (key === "player") setFilters((f) => ({ ...f, player: "", playerId: "", pid: "", opponent: "", minRank: "", minRankMode: "any" }));
-        if (key === "matchup") setFilters((f) => ({ ...f, packA: "", packB: "", winningPack: "", losingPack: "", mirrorMatch: false }));
+        if (key === "matchup") setFilters((f) => ({ ...f, packA: "", packB: "", winningPack: "", losingPack: "", excludeMirrors: false }));
         if (key === "pets") setSelectedPets([]);
         if (key === "perks") setSelectedPerks([]);
         if (key === "toys") setSelectedToys([]);
@@ -976,9 +976,9 @@ export default function Page() {
       nextFilters.matchType = "arena";
     }
 
-    if (name === "mirror") {
+    if (name === "no-mirror") {
       nextEnabled.matchup = true;
-      nextFilters.mirrorMatch = true;
+      nextFilters.excludeMirrors = true;
     }
 
     setFilters(nextFilters);
@@ -1192,7 +1192,7 @@ export default function Page() {
           <button type="button" className="ghost" onClick={() => applyExplorePreset("ranked")}>Ranked</button>
           <button type="button" className="ghost" onClick={() => applyExplorePreset("private")}>Private</button>
           <button type="button" className="ghost" onClick={() => applyExplorePreset("arena")}>Arena</button>
-          <button type="button" className="ghost" onClick={() => applyExplorePreset("mirror")}>Mirror</button>
+          <button type="button" className="ghost" onClick={() => applyExplorePreset("no-mirror")}>No Mirror</button>
         </div>
         <div className="toggles">
           <button type="button" className={enabled.player ? "toggle active" : "toggle"} onClick={() => toggleFilter("player")}>Player</button>
@@ -1309,10 +1309,10 @@ export default function Page() {
                   </select>
                 </div>
                 <div className="field">
-                  <label>Mirror Match</label>
+                  <label>Exclude Mirrors</label>
                   <select
-                    value={filters.mirrorMatch ? "yes" : "no"}
-                    onChange={(e) => setFilters({ ...filters, mirrorMatch: e.target.value === "yes" })}
+                    value={filters.excludeMirrors ? "yes" : "no"}
+                    onChange={(e) => setFilters({ ...filters, excludeMirrors: e.target.value === "yes" })}
                   >
                     <option value="no">No</option>
                     <option value="yes">Yes</option>
