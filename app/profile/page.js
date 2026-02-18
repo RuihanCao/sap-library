@@ -9,6 +9,7 @@ const PROFILE_NAME_KEY = "sap-library.profileName";
 const PROFILE_ID_KEY = "sap-library.profileId";
 const GOAT_PLAYER_ID = "310a80b8-0321-4e63-8924-eb462cce9221";
 const GOAT_TARGET_TURN = 11;
+const GOAT_TARGET_PACK = "Turtle";
 
 const BUILD_BACKGROUNDS = [
   "AboveCloudsBuild.png",
@@ -477,6 +478,7 @@ export default function ProfilePage() {
       const params = new URLSearchParams();
       params.set("scope", "battle");
       params.set("version", "current");
+      params.set("pack", GOAT_TARGET_PACK);
       const res = await fetch(`/api/leaderboard/${encodeURIComponent(GOAT_PLAYER_ID)}?${params.toString()}`);
       const data = await res.json();
       if (!res.ok) {
@@ -1495,6 +1497,7 @@ export default function ProfilePage() {
               <strong>Turn {GOAT_TARGET_TURN}</strong>
               <button type="button" className="ghost" onClick={loadGoatTurnStats}>Refresh</button>
             </div>
+            <div className="muted">{GOAT_TARGET_PACK} pack only</div>
             <div className="goat-turn-widget-player">{goatData?.playerName || "Loading..."}</div>
             {goatLoading ? <div className="muted">Loading...</div> : null}
             {!goatLoading && goatError ? <div className="muted">{goatError}</div> : null}
