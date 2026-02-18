@@ -1621,7 +1621,7 @@ button:hover:not(:disabled) {
 
 .leaderboard-row {
   display: grid;
-  grid-template-columns: minmax(220px, 1.3fr) repeat(8, minmax(80px, 0.75fr));
+  grid-template-columns: minmax(220px, 1.3fr) repeat(9, minmax(80px, 0.75fr));
   align-items: center;
   gap: 10px;
   border: 1px solid var(--edge);
@@ -1635,7 +1635,7 @@ button:hover:not(:disabled) {
 }
 
 .leaderboard-table.scope-game .leaderboard-row {
-  grid-template-columns: minmax(220px, 1.3fr) repeat(7, minmax(80px, 0.75fr));
+  grid-template-columns: minmax(220px, 1.3fr) repeat(8, minmax(80px, 0.75fr));
 }
 
 .leaderboard-table.scope-game .col-draw {
@@ -1678,13 +1678,19 @@ button:hover:not(:disabled) {
 }
 
 .leaderboard-sort-btn {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 4px;
   justify-content: flex-start;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  text-align: left;
   padding: 0;
   margin: 0;
   border: 0;
+  appearance: none;
+  -webkit-appearance: none;
   background: transparent;
   box-shadow: none;
   color: inherit;

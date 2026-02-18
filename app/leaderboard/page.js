@@ -154,6 +154,13 @@ function fixed(value, digits = 2) {
   return Number(value || 0).toFixed(digits);
 }
 
+function avgGameLength(rounds, games) {
+  const roundsNum = Number(rounds || 0);
+  const gamesNum = Number(games || 0);
+  if (gamesNum <= 0) return 0;
+  return roundsNum / gamesNum;
+}
+
 function defaultOrderForSort(sortKey) {
   return sortKey === "player_name" ? "asc" : "desc";
 }
@@ -716,6 +723,9 @@ export default function LeaderboardPage() {
             <button type="button" className={`leaderboard-sort-btn gold-text ${filters.sort === "avg_gold" ? "active" : ""}`} onClick={() => toggleSort("avg_gold")}>
               Avg Gold <span>{sortIndicator("avg_gold")}</span>
             </button>
+            <button type="button" className={`leaderboard-sort-btn ${filters.sort === "avg_game_length" ? "active" : ""}`} onClick={() => toggleSort("avg_game_length")}>
+              Avg Game Length <span>{sortIndicator("avg_game_length")}</span>
+            </button>
           </div>
           {players.map((player) => {
             const mostPlayedPackSprite = getPackSprite(player.mostPlayedPack);
@@ -749,6 +759,7 @@ export default function LeaderboardPage() {
                 <span className="metric-cell rate-win" data-label="Winrate">{pct(player.winrate)}</span>
                 <span className="metric-cell" data-label="Avg Rolls">{fixed(player.avgRollsPerTurn)}</span>
                 <span className="metric-cell gold-text" data-label="Avg Gold">{fixed(player.avgGoldPerTurn)}</span>
+                <span className="metric-cell" data-label="Avg Game Length">{fixed(player.avgGameLength, 2)}</span>
               </button>
             );
           })}
@@ -832,6 +843,10 @@ export default function LeaderboardPage() {
                       <SemanticLabel type="turn">Avg Gold/Turn</SemanticLabel>
                     </span>
                     <strong className="gold-text">{fixed(detail.summary?.avgGoldPerTurn)}</strong>
+                  </div>
+                  <div className="stats-summary-item">
+                    <span className="label">Avg Game Length</span>
+                    <strong>{fixed(avgGameLength(detail.summary?.rounds, detail.summary?.games), 2)}</strong>
                   </div>
                 </div>
 

@@ -164,7 +164,8 @@ function buildOrder(scope, sortKey, order) {
           drawrate: "j.drawrate",
           avg_rolls: "j.avg_rolls_per_turn",
           avg_gold: "j.avg_gold_per_turn",
-          avg_summons: "j.avg_summons_per_turn"
+          avg_summons: "j.avg_summons_per_turn",
+          avg_game_length: "j.avg_game_length"
         }
       : {
           player_name: "j.player_name",
@@ -178,7 +179,8 @@ function buildOrder(scope, sortKey, order) {
           drawrate: "j.drawrate",
           avg_rolls: "j.avg_rolls_per_turn",
           avg_gold: "j.avg_gold_per_turn",
-          avg_summons: "j.avg_summons_per_turn"
+          avg_summons: "j.avg_summons_per_turn",
+          avg_game_length: "j.avg_game_length"
         };
   const column = sortMap[sortKey] || "j.games";
   return `${column} ${direction}, j.player_name asc`;
@@ -268,6 +270,10 @@ function buildGameSql(orderBy) {
         coalesce(pta.avg_rolls_per_turn, 0::float8) as avg_rolls_per_turn,
         coalesce(pta.avg_gold_per_turn, 0::float8) as avg_gold_per_turn,
         coalesce(pta.avg_summons_per_turn, 0::float8) as avg_summons_per_turn,
+        case
+          when pr.games > 0 then coalesce(ptc.rounds, 0)::float8 / pr.games::float8
+          else 0::float8
+        end as avg_game_length,
         ptp.most_played_pack
       from player_rollup pr
       left join player_turn_counts ptc on ptc.player_id = pr.player_id
@@ -288,6 +294,7 @@ function buildGameSql(orderBy) {
       j.avg_rolls_per_turn,
       j.avg_gold_per_turn,
       j.avg_summons_per_turn,
+      j.avg_game_length,
       j.most_played_pack,
       count(*) over()::int as total_players
     from joined j
@@ -358,6 +365,10 @@ function buildBattleSql(orderBy) {
         coalesce(pr.avg_rolls_per_turn, 0::float8) as avg_rolls_per_turn,
         coalesce(pr.avg_gold_per_turn, 0::float8) as avg_gold_per_turn,
         coalesce(pr.avg_summons_per_turn, 0::float8) as avg_summons_per_turn,
+        case
+          when pr.games > 0 then pr.rounds::float8 / pr.games::float8
+          else 0::float8
+        end as avg_game_length,
         ptp.most_played_pack
       from player_rollup pr
       left join player_top_pack ptp on ptp.player_id = pr.player_id
@@ -376,6 +387,7 @@ function buildBattleSql(orderBy) {
       j.avg_rolls_per_turn,
       j.avg_gold_per_turn,
       j.avg_summons_per_turn,
+      j.avg_game_length,
       j.most_played_pack,
       count(*) over()::int as total_players
     from joined j
@@ -456,6 +468,7 @@ export async function GET(req) {
         avgRollsPerTurn: Number(row.avg_rolls_per_turn || 0),
         avgGoldPerTurn: Number(row.avg_gold_per_turn || 0),
         avgSummonsPerTurn: Number(row.avg_summons_per_turn || 0),
+        avgGameLength: Number(row.avg_game_length || 0),
         mostPlayedPack: row.most_played_pack || null
       }))
     },
