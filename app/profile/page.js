@@ -7,6 +7,8 @@ import { SemanticLabel } from "@/app/components/semantic-label";
 
 const PROFILE_NAME_KEY = "sap-library.profileName";
 const PROFILE_ID_KEY = "sap-library.profileId";
+const GOAT_PLAYER_ID = "310a80b8-0321-4e63-8924-eb462cce9221";
+const GOAT_TARGET_TURN = 11;
 
 const BUILD_BACKGROUNDS = [
   "AboveCloudsBuild.png",
@@ -249,6 +251,10 @@ export default function ProfilePage() {
   const [modalLoading, setModalLoading] = useState(false);
   const [modalData, setModalData] = useState(null);
   const [modalShareStatus, setModalShareStatus] = useState("");
+  const [goatOpen, setGoatOpen] = useState(false);
+  const [goatLoading, setGoatLoading] = useState(false);
+  const [goatData, setGoatData] = useState(null);
+  const [goatError, setGoatError] = useState("");
   const [status, setStatus] = useState("");
   const gamesSentinelRef = useRef(null);
   const suggestionAbortRef = useRef(null);
@@ -462,6 +468,49 @@ export default function ProfilePage() {
   function closeModal() {
     setModalOpen(false);
     setModalShareStatus("");
+  }
+
+  async function loadGoatTurnStats() {
+    setGoatLoading(true);
+    setGoatError("");
+    try {
+      const params = new URLSearchParams();
+      params.set("scope", "battle");
+      params.set("version", "current");
+      const res = await fetch(`/api/leaderboard/${encodeURIComponent(GOAT_PLAYER_ID)}?${params.toString()}`);
+      const data = await res.json();
+      if (!res.ok) {
+        setGoatData(null);
+        setGoatError(data?.error || "Failed to load turn stats.");
+        return;
+      }
+
+      const perTurn = Array.isArray(data?.perTurn) ? data.perTurn : [];
+      const row = perTurn.find((item) => Number(item?.turn_number) === GOAT_TARGET_TURN) || null;
+      if (!row) {
+        setGoatData({ playerName: data?.playerName || "Unknown", turn: null });
+        setGoatError(`No turn ${GOAT_TARGET_TURN} rows found.`);
+        return;
+      }
+
+      setGoatData({
+        playerName: data?.playerName || "Unknown",
+        turn: row
+      });
+    } catch {
+      setGoatData(null);
+      setGoatError("Failed to load turn stats.");
+    } finally {
+      setGoatLoading(false);
+    }
+  }
+
+  async function handleGoatClick() {
+    const nextOpen = !goatOpen;
+    setGoatOpen(nextOpen);
+    if (!nextOpen) return;
+    if (goatData || goatLoading) return;
+    await loadGoatTurnStats();
   }
 
   async function copyReplayShareLink() {
@@ -1429,6 +1478,40 @@ export default function ProfilePage() {
           </div>
         </div>
       )}
+
+      <div className="goat-turn-widget">
+        <button
+          type="button"
+          className="goat-turn-widget-trigger"
+          onClick={handleGoatClick}
+          title="Turn 11 Goat Stats"
+          aria-label="Toggle Turn 11 Goat Stats"
+        >
+          <img src="/Sprite/Pets/Goat.png" alt="" />
+        </button>
+        {goatOpen ? (
+          <div className="goat-turn-widget-panel">
+            <div className="goat-turn-widget-head">
+              <strong>Turn {GOAT_TARGET_TURN}</strong>
+              <button type="button" className="ghost" onClick={loadGoatTurnStats}>Refresh</button>
+            </div>
+            <div className="goat-turn-widget-player">{goatData?.playerName || "Loading..."}</div>
+            {goatLoading ? <div className="muted">Loading...</div> : null}
+            {!goatLoading && goatError ? <div className="muted">{goatError}</div> : null}
+            {!goatLoading && goatData?.turn ? (
+              <div className="goat-turn-widget-grid">
+                <div><span>Rounds</span><strong>{Number(goatData.turn.rounds || 0)}</strong></div>
+                <div><span>Wins</span><strong className="rate-win">{Number(goatData.turn.wins || 0)}</strong></div>
+                <div><span>Losses</span><strong className="rate-loss">{Number(goatData.turn.losses || 0)}</strong></div>
+                <div><span>Draws</span><strong>{Number(goatData.turn.draws || 0)}</strong></div>
+                <div><span>Winrate</span><strong className="rate-win">{pct(goatData.turn.winrate)}</strong></div>
+                <div><span>Avg Rolls</span><strong>{fixed(goatData.turn.avg_rolls_per_turn)}</strong></div>
+                <div><span>Avg Gold</span><strong className="gold-text">{fixed(goatData.turn.avg_gold_per_turn)}</strong></div>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
     </main>
   );
 }

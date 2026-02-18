@@ -1879,6 +1879,80 @@ button:hover:not(:disabled) {
   background: rgba(245, 224, 128, 0.3);
 }
 
+.goat-turn-widget {
+  position: fixed;
+  top: 96px;
+  right: 10px;
+  z-index: 75;
+  display: grid;
+  justify-items: end;
+  gap: 8px;
+}
+
+.goat-turn-widget-trigger {
+  width: 52px;
+  height: 52px;
+  border: 1px solid var(--edge);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.9);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
+  cursor: pointer;
+}
+
+.goat-turn-widget-trigger img {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+}
+
+.goat-turn-widget-panel {
+  width: min(320px, calc(100vw - 20px));
+  border: 1px solid var(--edge);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.22);
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.goat-turn-widget-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.goat-turn-widget-player {
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.goat-turn-widget-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.goat-turn-widget-grid > div {
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.8);
+  padding: 6px 8px;
+  display: grid;
+  gap: 2px;
+}
+
+.goat-turn-widget-grid span {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .stats-table.pack .stats-row {
   grid-template-columns: 1.2fr 0.6fr 0.7fr 0.7fr;
 }
