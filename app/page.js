@@ -286,6 +286,7 @@ const DEFAULT_FILTERS = {
   packA: "",
   packB: "",
   winningPack: "",
+  losingPack: "",
   excludeA: "",
   excludeB: "",
   mirrorMatch: false,
@@ -513,6 +514,7 @@ export default function Page() {
       if (filtersValue.packA) params.set("packA", filtersValue.packA);
       if (filtersValue.packB) params.set("packB", filtersValue.packB);
       if (filtersValue.winningPack) params.set("winningPack", filtersValue.winningPack);
+      if (filtersValue.losingPack) params.set("losingPack", filtersValue.losingPack);
       if (filtersValue.mirrorMatch) params.set("mirrorMatch", "true");
     }
     if (enabledValue.pets) {
@@ -606,6 +608,7 @@ export default function Page() {
     assignText("packA");
     assignText("packB");
     assignText("winningPack");
+    assignText("losingPack");
     assignText("excludeA");
     assignText("excludeB");
     assignText("petMode");
@@ -649,7 +652,7 @@ export default function Page() {
       }
     } else {
       nextEnabled.player = Boolean(nextFilters.player || nextFilters.playerId || nextFilters.pid || nextFilters.opponent || nextFilters.minRank);
-      nextEnabled.matchup = Boolean(nextFilters.packA || nextFilters.packB || nextFilters.winningPack || nextFilters.mirrorMatch);
+      nextEnabled.matchup = Boolean(nextFilters.packA || nextFilters.packB || nextFilters.winningPack || nextFilters.losingPack || nextFilters.mirrorMatch);
       nextEnabled.pets = Boolean(nextSelectedPets.length);
       nextEnabled.perks = Boolean(nextSelectedPerks.length);
       nextEnabled.toys = Boolean(nextSelectedToys.length);
@@ -711,7 +714,7 @@ export default function Page() {
       const next = { ...prev, [key]: !prev[key] };
         if (!next[key]) {
         if (key === "player") setFilters((f) => ({ ...f, player: "", playerId: "", pid: "", opponent: "", minRank: "", minRankMode: "any" }));
-        if (key === "matchup") setFilters((f) => ({ ...f, packA: "", packB: "", winningPack: "", mirrorMatch: false }));
+        if (key === "matchup") setFilters((f) => ({ ...f, packA: "", packB: "", winningPack: "", losingPack: "", mirrorMatch: false }));
         if (key === "pets") setSelectedPets([]);
         if (key === "perks") setSelectedPerks([]);
         if (key === "toys") setSelectedToys([]);
@@ -1324,6 +1327,20 @@ export default function Page() {
                     <option value="">Any</option>
                     {meta.packs.map((pack) => (
                       <option key={`win-${pack.id}`} value={pack.name}>
+                        {pack.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Losing Pack</label>
+                  <select
+                    value={filters.losingPack}
+                    onChange={(e) => setFilters({ ...filters, losingPack: e.target.value })}
+                  >
+                    <option value="">Any</option>
+                    {meta.packs.map((pack) => (
+                      <option key={`lose-${pack.id}`} value={pack.name}>
                         {pack.name}
                       </option>
                     ))}

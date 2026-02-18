@@ -83,6 +83,7 @@ export async function GET(req) {
   const season = seasonRaw ? seasonRaw.trim().toLowerCase() : "";
   const lobbyCode = searchParams.get("lobbyCode");
   const winningPack = searchParams.get("winningPack");
+  const losingPack = searchParams.get("losingPack");
   const minRankRaw = searchParams.get("minRank");
   const minRank = minRankRaw !== null && minRankRaw !== "" && Number.isFinite(Number(minRankRaw))
     ? Number(minRankRaw)
@@ -309,6 +310,17 @@ export async function GET(req) {
       case
         when (select t.outcome from turns t where t.replay_id = r.id order by t.turn_number desc limit 1) = 1 then r.pack
         when (select t.outcome from turns t where t.replay_id = r.id order by t.turn_number desc limit 1) = 2 then r.opponent_pack
+        else null
+      end
+    ) = $${values.length}`);
+  }
+
+  if (losingPack) {
+    values.push(losingPack);
+    clauses.push(`(
+      case
+        when (select t.outcome from turns t where t.replay_id = r.id order by t.turn_number desc limit 1) = 1 then r.opponent_pack
+        when (select t.outcome from turns t where t.replay_id = r.id order by t.turn_number desc limit 1) = 2 then r.pack
         else null
       end
     ) = $${values.length}`);

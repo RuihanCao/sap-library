@@ -55,6 +55,10 @@ export async function GET(req) {
   const minSample = minSampleRaw !== null && minSampleRaw !== "" && Number.isFinite(Number(minSampleRaw))
     ? Math.max(0, Number(minSampleRaw))
     : 10;
+  const minEndOnRaw = searchParams.get("minEndOn");
+  const minEndOn = minEndOnRaw !== null && minEndOnRaw !== "" && Number.isFinite(Number(minEndOnRaw))
+    ? Math.max(0, Number(minEndOnRaw))
+    : null;
   const minTurnRaw = searchParams.get("minTurn");
   const maxTurnRaw = searchParams.get("maxTurn");
   const minTurn = minTurnRaw !== null && minTurnRaw !== "" && Number.isFinite(Number(minTurnRaw))
@@ -181,6 +185,9 @@ export async function GET(req) {
   const petLevelClause = petLevel ? "and p.level = $PET_LEVEL" : "";
   const perkClause = perk.length ? "and p.perk = any($PERK)" : "";
   const toyClause = toy.length ? "and p.toy = any($TOY)" : "";
+  const minEndOnPetClause = minEndOn !== null ? " and ps.games_end >= $MIN_END_ON" : "";
+  const minEndOnPerkClause = minEndOn !== null ? " and ps.games_end >= $MIN_END_ON" : "";
+  const minEndOnToyClause = minEndOn !== null ? " and ts.games_end >= $MIN_END_ON" : "";
 
   const allyPetFilter = allyPet.length
     ? "and exists (select 1 from pets ap where ap.replay_id = r.id and ap.side = 'player' and ap.pet_name = any($ALLY_PET))"
@@ -660,9 +667,9 @@ export async function GET(req) {
       (select count(*) from turns t join base b on b.id = t.replay_id) as total_battles,
       (select max(created_at) from base) as newest_entry_at,
       (select coalesce(json_agg(row_to_json(ps) order by ps.pack), '[]'::json) from pack_stats_agg ps where ps.rate_games >= $MIN_SAMPLE_SIZE) as pack_stats,
-      (select coalesce(json_agg(row_to_json(ps) order by ps.games_with desc, ps.pet_name asc), '[]'::json) from pet_stats_agg ps where ps.games_with >= $MIN_SAMPLE_SIZE or ${petBypassesMinSample ? "true" : "false"}) as pet_stats,
-      (select coalesce(json_agg(row_to_json(ps) order by ps.games_with desc, ps.perk_name asc), '[]'::json) from perk_stats_agg ps where ps.games_with >= $MIN_SAMPLE_SIZE) as perk_stats,
-      (select coalesce(json_agg(row_to_json(ts) order by ts.games_with desc, ts.toy_name asc), '[]'::json) from toy_stats_agg ts where ts.games_with >= $MIN_SAMPLE_SIZE) as toy_stats
+      (select coalesce(json_agg(row_to_json(ps) order by ps.games_with desc, ps.pet_name asc), '[]'::json) from pet_stats_agg ps where (ps.games_with >= $MIN_SAMPLE_SIZE or ${petBypassesMinSample ? "true" : "false"})${minEndOnPetClause}) as pet_stats,
+      (select coalesce(json_agg(row_to_json(ps) order by ps.games_with desc, ps.perk_name asc), '[]'::json) from perk_stats_agg ps where ps.games_with >= $MIN_SAMPLE_SIZE${minEndOnPerkClause}) as perk_stats,
+      (select coalesce(json_agg(row_to_json(ts) order by ts.games_with desc, ts.toy_name asc), '[]'::json) from toy_stats_agg ts where ts.games_with >= $MIN_SAMPLE_SIZE${minEndOnToyClause}) as toy_stats
   `;
 
   const battleSql = `
@@ -894,6 +901,7 @@ export async function GET(req) {
   bindToken("$ALLY_TOY", allyToy.length ? allyToy : null);
   bindToken("$OPP_TOY", opponentToy.length ? opponentToy : null);
   bindToken("$MIN_SAMPLE_SIZE", minSample);
+  bindToken("$MIN_END_ON", minEndOn);
   if (minTurn !== null) {
     const minTurnIndex = finalValues.length + 1;
     sql = sql.replace(/\$MIN_TURN/g, `$${minTurnIndex}`);

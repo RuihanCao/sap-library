@@ -183,6 +183,7 @@ const DEFAULT_STATS_FILTERS = {
   excludePack: "",
   excludeMirrors: false,
   minSample: "10",
+  minEndOn: "",
   minElo: "",
   maxElo: "",
   itemPack: "",
@@ -466,6 +467,7 @@ export default function StatsPage() {
     if (nextFilters.excludePack) params.set("excludePack", nextFilters.excludePack);
     if (nextFilters.excludeMirrors) params.set("excludeMirrors", "true");
     if (nextFilters.minSample) params.set("minSample", nextFilters.minSample);
+    if (nextFilters.minEndOn) params.set("minEndOn", nextFilters.minEndOn);
     if (nextFilters.minElo) params.set("minElo", nextFilters.minElo);
     if (nextFilters.maxElo) params.set("maxElo", nextFilters.maxElo);
     if (nextFilters.itemPack) params.set("itemPack", nextFilters.itemPack);
@@ -543,6 +545,7 @@ export default function StatsPage() {
       excludePack: urlParams.get("excludePack") || "",
       excludeMirrors: urlParams.get("excludeMirrors") === "true",
       minSample: urlParams.get("minSample") || "10",
+      minEndOn: urlParams.get("minEndOn") || "",
       minElo: urlParams.get("minElo") || "",
       maxElo: urlParams.get("maxElo") || "",
       itemPack: urlParams.get("itemPack") || "",
@@ -956,6 +959,18 @@ export default function StatsPage() {
               onChange={(e) => setFilters({ ...filters, minSample: e.target.value })}
             />
           </div>
+          {filters.scope === "game" && (
+            <div className="field">
+              <label>Min End On #</label>
+              <input
+                type="number"
+                min="0"
+                placeholder="Any"
+                value={filters.minEndOn}
+                onChange={(e) => setFilters({ ...filters, minEndOn: e.target.value })}
+              />
+            </div>
+          )}
           <div className="field">
             <label>Min Elo</label>
             <input
