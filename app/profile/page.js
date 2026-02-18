@@ -1494,7 +1494,7 @@ export default function ProfilePage() {
         {goatOpen ? (
           <div className="goat-turn-widget-panel">
             <div className="goat-turn-widget-head">
-              <strong>Turn {GOAT_TARGET_TURN}</strong>
+              <strong>Turn {GOAT_TARGET_TURN} (Buh Theory)</strong>
               <button type="button" className="ghost" onClick={loadGoatTurnStats}>Refresh</button>
             </div>
             <div className="muted">{GOAT_TARGET_PACK} pack only</div>
