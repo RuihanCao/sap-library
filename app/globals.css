@@ -2093,6 +2093,10 @@ button:hover:not(:disabled) {
     padding: 16px 12px 56px;
   }
 
+  .goat-turn-widget {
+    display: none;
+  }
+
   .section {
     padding: 16px;
     max-width: 100%;
