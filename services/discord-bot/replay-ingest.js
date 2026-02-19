@@ -1,6 +1,7 @@
 const { Pool } = require("pg");
 const { parseReplay } = require("../../lib/parse");
 const { fetchParticipationReplay } = require("../../lib/sapPlayback");
+const { registerReplayInsertAndMaybeStartTopBoards } = require("../../lib/topBoardsAutoRun");
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL
@@ -339,6 +340,28 @@ async function ingestParticipationReplay(rawParticipationId) {
           pet.toy
         ]
       );
+    }
+
+    try {
+      const autoRun = await registerReplayInsertAndMaybeStartTopBoards({
+        db: pool,
+        source: "discord.replay_ingest",
+        matchType: finalParsed.matchType,
+        incrementBy: 1,
+        replayCreatedAt: new Date().toISOString(),
+        logger: console
+      });
+      if (autoRun?.triggered) {
+        console.log("Top boards autorun queued from discord replay ingest", {
+          runId: autoRun.runId,
+          pendingReplays: autoRun.pendingReplays
+        });
+      }
+    } catch (autoRunError) {
+      console.warn("Top boards autorun check failed after discord replay insert", {
+        replayId,
+        error: autoRunError?.message || autoRunError
+      });
     }
 
     return { status: "inserted", replayId, participationId };

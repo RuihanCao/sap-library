@@ -3,8 +3,15 @@ import { pool } from "@/lib/db";
 const { parseReplay } = require("@/lib/parse");
 const { fetchParticipationReplay } = require("@/lib/sapPlayback");
 const { rateLimit, applyRateLimitHeaders, rateLimitResponse } = require("@/lib/rateLimit");
+const { registerReplayInsertAndMaybeStartTopBoards } = require("@/lib/topBoardsAutoRun");
 
 export const runtime = "nodejs";
+
+function normalizeTopBoardsMatchType(value) {
+  const type = String(value || "").trim().toLowerCase();
+  if (type === "ranked" || type === "private" || type === "arena") return type;
+  return null;
+}
 
 function isFiniteRank(value) {
   return Number.isFinite(value) ? value : null;
@@ -113,6 +120,11 @@ export async function POST(req) {
   let skippedParticipation = 0;
   let skippedMatch = 0;
   let failed = 0;
+  const insertedByMatchType = {
+    ranked: 0,
+    private: 0,
+    arena: 0
+  };
   const failedEntries = [];
 
   try {
@@ -283,10 +295,43 @@ export async function POST(req) {
         }
 
         inserted += 1;
+        const topBoardsMatchType = normalizeTopBoardsMatchType(finalParsed.matchType);
+        if (topBoardsMatchType) {
+          insertedByMatchType[topBoardsMatchType] += 1;
+        }
       } catch (err) {
         console.error("Bulk ingest failed", { participationId, error: err.message });
         failed += 1;
         failedEntries.push({ participationId, reason: err.message || "failed" });
+      }
+    }
+
+    if (inserted > 0) {
+      try {
+        for (const [matchType, count] of Object.entries(insertedByMatchType)) {
+          if (!count) continue;
+          const autoRun = await registerReplayInsertAndMaybeStartTopBoards({
+            db: pool,
+            source: "api.replays.bulk",
+            matchType,
+            incrementBy: count,
+            replayCreatedAt: new Date().toISOString(),
+            logger: console
+          });
+          if (autoRun?.triggered) {
+            console.log("Top boards autorun queued from bulk replay ingest", {
+              runId: autoRun.runId,
+              pendingReplays: autoRun.pendingReplays,
+              matchType,
+              inserted: count
+            });
+          }
+        }
+      } catch (autoRunError) {
+        console.warn("Top boards autorun check failed after bulk replay insert", {
+          insertedByMatchType,
+          error: autoRunError?.message || autoRunError
+        });
       }
     }
 

@@ -3,6 +3,7 @@ import { pool } from "@/lib/db";
 const { parseReplay } = require("@/lib/parse");
 const { fetchParticipationReplay } = require("@/lib/sapPlayback");
 const { rateLimit, applyRateLimitHeaders, rateLimitResponse } = require("@/lib/rateLimit");
+const { registerReplayInsertAndMaybeStartTopBoards } = require("@/lib/topBoardsAutoRun");
 
 export const runtime = "nodejs";
 
@@ -336,6 +337,28 @@ export async function POST(req) {
           p.toy
         ]
       );
+    }
+
+    try {
+      const autoRun = await registerReplayInsertAndMaybeStartTopBoards({
+        db: pool,
+        source: "api.replays",
+        matchType: finalParsed.matchType,
+        incrementBy: 1,
+        replayCreatedAt: new Date().toISOString(),
+        logger: console
+      });
+      if (autoRun?.triggered) {
+        console.log("Top boards autorun queued from api replay ingest", {
+          runId: autoRun.runId,
+          pendingReplays: autoRun.pendingReplays
+        });
+      }
+    } catch (autoRunError) {
+      console.warn("Top boards autorun check failed after replay insert", {
+        replayId,
+        error: autoRunError?.message || autoRunError
+      });
     }
 
     const res = NextResponse.json({ replayId, status: "inserted" });

@@ -919,6 +919,7 @@ export default function ProfilePage() {
           <Link href="/stats" className="nav-link">Stats</Link>
           <Link href="/leaderboard" className="nav-link">Leaderboard</Link>
           <Link href="/profile" className="nav-link active">Profile</Link>
+          <Link href="/boards" className="nav-link">Boards</Link>
         </nav>
       </section>
 

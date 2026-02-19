@@ -499,6 +499,7 @@ export default function LeaderboardPage() {
           <Link href="/stats" className="nav-link">Stats</Link>
           <Link href="/leaderboard" className="nav-link active">Leaderboard</Link>
           <Link href="/profile" className="nav-link">Profile</Link>
+          <Link href="/boards" className="nav-link">Boards</Link>
         </nav>
       </section>
 

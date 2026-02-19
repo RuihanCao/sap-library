@@ -950,6 +950,7 @@ export default function StatsPage() {
           <Link href="/stats" className="nav-link active">Stats</Link>
           <Link href="/leaderboard" className="nav-link">Leaderboard</Link>
           <Link href="/profile" className="nav-link">Profile</Link>
+          <Link href="/boards" className="nav-link">Boards</Link>
         </nav>
       </header>
 

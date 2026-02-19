@@ -8,6 +8,7 @@
     "build": "next build",
     "start": "next start",
     "bot:discord": "node services/discord-bot/index.js",
+    "top-boards:run": "node scripts/run-top-boards.js",
     "backfill:game-version": "node scripts/backfill-game-version.js",
     "backfill:ranks-v45": "node scripts/backfill-ranks-v45.js",
     "backfill:ranks-recent": "node scripts/backfill-ranks-v45.js --recent-hours=1 --all-versions"

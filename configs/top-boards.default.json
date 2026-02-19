@@ -1,0 +1,59 @@
+{
+  "configName": "top-boards-v1-default",
+  "dataset": {
+    "version": "current",
+    "matchTypes": [
+      "ranked"
+    ],
+    "sides": [
+      "player",
+      "opponent"
+    ],
+    "excludePacks": [
+      "Custom",
+      "Weekly"
+    ],
+    "minTurn": 1,
+    "maxTurn": null,
+    "maxBoards": 4000,
+    "sampleSeed": 1337,
+    "dedupeByBoardHash": true
+  },
+  "stages": {
+    "qualifier": {
+      "strategy": "random-opponents",
+      "opponentsPerBoard": 30,
+      "simulationCount": 3,
+      "keepTop": 400
+    },
+    "semifinal": {
+      "strategy": "swiss",
+      "rounds": 25,
+      "simulationCount": 7,
+      "keepTop": 120
+    },
+    "final": {
+      "strategy": "round-robin",
+      "topN": 100,
+      "simulationCount": 25
+    }
+  },
+  "rating": {
+    "algorithm": "elo",
+    "initialRating": 1500,
+    "kFactor": 16,
+    "drawValue": 0.5
+  },
+  "execution": {
+    "workers": 8,
+    "batchSize": 200,
+    "maxMinutes": 360,
+    "retryOnError": 1,
+    "onSimulationError": "count_as_draw",
+    "checkpointEveryPairs": 1000
+  },
+  "publish": {
+    "scopeKeyTemplate": "version={version}|matchType={matchTypes}|sides={sides}",
+    "replaceLatest": true
+  }
+}

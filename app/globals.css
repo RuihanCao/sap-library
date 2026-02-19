@@ -2383,3 +2383,136 @@ button:hover:not(:disabled) {
     word-break: break-word;
   }
 }
+
+.boards-table-wrap {
+  width: 100%;
+  overflow: auto;
+  border: 1px solid var(--edge);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.boards-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 880px;
+}
+
+.boards-table th,
+.boards-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  font-size: 13px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.boards-table thead th {
+  position: sticky;
+  top: 0;
+  background: rgba(255, 255, 255, 0.95);
+  z-index: 1;
+}
+
+.boards-table tbody tr {
+  cursor: pointer;
+}
+
+.boards-table tbody tr:hover {
+  background: rgba(58, 167, 201, 0.12);
+}
+
+.boards-table tbody tr.active {
+  background: rgba(58, 167, 201, 0.2);
+}
+
+.boards-pack-cell .pack-name-inline {
+  min-width: 0;
+}
+
+.boards-record-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.boards-record-sep {
+  color: var(--muted);
+}
+
+.boards-modal {
+  width: min(1080px, 100%);
+}
+
+.boards-modal-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 380px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.boards-detail-card {
+  border: 1px solid var(--edge);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.62);
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
+.boards-pet-list {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.boards-pet-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.boards-pet-slot {
+  color: var(--muted);
+}
+
+.boards-inline-entity {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.boards-inline-entity img {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+}
+
+.boards-pet-perk {
+  color: var(--muted);
+}
+
+.boards-pet-perk-label {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.boards-modal-image-wrap {
+  margin-top: 0;
+  min-height: 0;
+}
+
+.boards-modal-image {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+@media (max-width: 900px) {
+  .boards-modal-grid {
+    grid-template-columns: 1fr;
+  }
+}
