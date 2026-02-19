@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { getPackSprite } from "@/lib/packSprites";
 import { SemanticLabel } from "@/app/components/semantic-label";
@@ -156,6 +156,8 @@ const FILTER_FALLBACK_SPRITES = {
   toy: "/Sprite/Toys/RelicFoamSword.png",
   turn: "/hourglass-twemoji.png"
 };
+const STATS_INITIAL_BATCH = 24;
+const STATS_BATCH_SIZE = 24;
 
 function parseCsvList(value) {
   if (!value) return [];
@@ -412,6 +414,18 @@ export default function StatsPage() {
     toy: false
   });
   const [shareStatus, setShareStatus] = useState("");
+  const [visibleRows, setVisibleRows] = useState({
+    pack: STATS_INITIAL_BATCH,
+    pet: STATS_INITIAL_BATCH,
+    perk: STATS_INITIAL_BATCH,
+    toy: STATS_INITIAL_BATCH,
+    matchup: STATS_INITIAL_BATCH
+  });
+  const packSentinelRef = useRef(null);
+  const petSentinelRef = useRef(null);
+  const perkSentinelRef = useRef(null);
+  const toySentinelRef = useRef(null);
+  const matchupSentinelRef = useRef(null);
 
   useEffect(() => {
     if (!BUILD_BACKGROUNDS.length) return;
@@ -834,6 +848,74 @@ export default function StatsPage() {
       compareRows(a, b, toySort, toyOrder, stats.totalGames, "toy_name")
     );
   }, [stats.toyStats, stats.totalGames, toySort, toyOrder, toyMetaMap, itemPackFilter]);
+  useEffect(() => {
+    setVisibleRows({
+      pack: Math.min(STATS_INITIAL_BATCH, sortedPackStats.length),
+      pet: Math.min(STATS_INITIAL_BATCH, sortedPetStats.length),
+      perk: Math.min(STATS_INITIAL_BATCH, sortedPerkStats.length),
+      toy: Math.min(STATS_INITIAL_BATCH, sortedToyStats.length),
+      matchup: Math.min(STATS_INITIAL_BATCH, sortedMatchupStats.length)
+    });
+  }, [sortedPackStats, sortedPetStats, sortedPerkStats, sortedToyStats, sortedMatchupStats]);
+  useEffect(() => {
+    const sectionConfigs = [
+      { key: "pack", collapsed: collapsed.pack, total: sortedPackStats.length, ref: packSentinelRef },
+      { key: "pet", collapsed: collapsed.pet, total: sortedPetStats.length, ref: petSentinelRef },
+      { key: "perk", collapsed: collapsed.perk, total: sortedPerkStats.length, ref: perkSentinelRef },
+      { key: "toy", collapsed: collapsed.toy, total: sortedToyStats.length, ref: toySentinelRef },
+      { key: "matchup", collapsed: collapsed.matchup, total: sortedMatchupStats.length, ref: matchupSentinelRef }
+    ];
+    const observers = [];
+    for (const section of sectionConfigs) {
+      const node = section.ref.current;
+      if (!node) continue;
+      if (section.collapsed) continue;
+      if ((visibleRows[section.key] || 0) >= section.total) continue;
+
+      const observer = new IntersectionObserver(
+        (entries) => {
+          const entry = entries[0];
+          if (!entry?.isIntersecting) return;
+          setVisibleRows((prev) => {
+            const current = prev[section.key] || 0;
+            if (current >= section.total) return prev;
+            return {
+              ...prev,
+              [section.key]: Math.min(section.total, current + STATS_BATCH_SIZE)
+            };
+          });
+        },
+        { root: null, rootMargin: "260px 0px", threshold: 0.01 }
+      );
+      observer.observe(node);
+      observers.push(observer);
+    }
+    return () => observers.forEach((observer) => observer.disconnect());
+  }, [
+    collapsed.pack,
+    collapsed.pet,
+    collapsed.perk,
+    collapsed.toy,
+    collapsed.matchup,
+    sortedPackStats.length,
+    sortedPetStats.length,
+    sortedPerkStats.length,
+    sortedToyStats.length,
+    sortedMatchupStats.length,
+    visibleRows.pack,
+    visibleRows.pet,
+    visibleRows.perk,
+    visibleRows.toy,
+    visibleRows.matchup
+  ]);
+  const visiblePackStats = useMemo(() => sortedPackStats.slice(0, visibleRows.pack), [sortedPackStats, visibleRows.pack]);
+  const visiblePetStats = useMemo(() => sortedPetStats.slice(0, visibleRows.pet), [sortedPetStats, visibleRows.pet]);
+  const visiblePerkStats = useMemo(() => sortedPerkStats.slice(0, visibleRows.perk), [sortedPerkStats, visibleRows.perk]);
+  const visibleToyStats = useMemo(() => sortedToyStats.slice(0, visibleRows.toy), [sortedToyStats, visibleRows.toy]);
+  const visibleMatchupStats = useMemo(
+    () => sortedMatchupStats.slice(0, visibleRows.matchup),
+    [sortedMatchupStats, visibleRows.matchup]
+  );
   const totalPetCount = useMemo(
     () => (filteredPetStats || []).reduce((sum, row) => sum + Number(row.games_with || 0), 0),
     [filteredPetStats]
@@ -1253,8 +1335,9 @@ export default function StatsPage() {
           </div>
         </div>
         {!collapsed.pack && (
+        <>
         <div className={statsCardsClass}>
-          {sortedPackStats.map((row) => {
+          {visiblePackStats.map((row) => {
             const games = Number(row.games || 0);
             const wins = Number(row.wins || 0);
             const draws = Number(row.draws || 0);
@@ -1290,10 +1373,17 @@ export default function StatsPage() {
               </div>
             );
           })}
-          {stats.packStats.length === 0 && !loading && (
+          {sortedPackStats.length === 0 && !loading && (
             <div className="stats-card empty">No pack stats yet.</div>
           )}
         </div>
+        {sortedPackStats.length > 0 && (
+          <div className="infinite-footer">
+            <div className="page-info">{visiblePackStats.length} / {sortedPackStats.length}</div>
+            <div ref={packSentinelRef} className="list-sentinel" />
+          </div>
+        )}
+        </>
         )}
       </section>
 
@@ -1366,8 +1456,9 @@ export default function StatsPage() {
           </div>
         </div>
         {!collapsed.pet && (
+        <>
         <div className={statsCardsClass}>
-          {sortedPetStats.map((row) => {
+          {visiblePetStats.map((row) => {
             const games = Number(stats.totalGames || 0);
             const gamesWith = Number(row.games_with || 0);
             const winsWith = Number(row.wins_with || 0);
@@ -1419,6 +1510,13 @@ export default function StatsPage() {
             <div className="stats-card empty">No pet stats yet.</div>
           )}
         </div>
+        {sortedPetStats.length > 0 && (
+          <div className="infinite-footer">
+            <div className="page-info">{visiblePetStats.length} / {sortedPetStats.length}</div>
+            <div ref={petSentinelRef} className="list-sentinel" />
+          </div>
+        )}
+        </>
         )}
       </section>
 
@@ -1491,8 +1589,9 @@ export default function StatsPage() {
           </div>
         </div>
         {!collapsed.perk && (
+        <>
         <div className={statsCardsClass}>
-          {sortedPerkStats.map((row) => {
+          {visiblePerkStats.map((row) => {
             const games = Number(stats.totalGames || 0);
             const gamesWith = Number(row.games_with || 0);
             const winsWith = Number(row.wins_with || 0);
@@ -1540,10 +1639,17 @@ export default function StatsPage() {
               </div>
             );
           })}
-          {stats.perkStats.length === 0 && !loading && (
+          {sortedPerkStats.length === 0 && !loading && (
             <div className="stats-card empty">No perk stats yet.</div>
           )}
         </div>
+        {sortedPerkStats.length > 0 && (
+          <div className="infinite-footer">
+            <div className="page-info">{visiblePerkStats.length} / {sortedPerkStats.length}</div>
+            <div ref={perkSentinelRef} className="list-sentinel" />
+          </div>
+        )}
+        </>
         )}
       </section>
 
@@ -1616,8 +1722,9 @@ export default function StatsPage() {
           </div>
         </div>
         {!collapsed.toy && (
+        <>
         <div className={statsCardsClass}>
-          {sortedToyStats.map((row) => {
+          {visibleToyStats.map((row) => {
             const games = Number(stats.totalGames || 0);
             const gamesWith = Number(row.games_with || 0);
             const winsWith = Number(row.wins_with || 0);
@@ -1665,10 +1772,17 @@ export default function StatsPage() {
               </div>
             );
           })}
-          {stats.toyStats.length === 0 && !loading && (
+          {sortedToyStats.length === 0 && !loading && (
             <div className="stats-card empty">No toy stats yet.</div>
           )}
         </div>
+        {sortedToyStats.length > 0 && (
+          <div className="infinite-footer">
+            <div className="page-info">{visibleToyStats.length} / {sortedToyStats.length}</div>
+            <div ref={toySentinelRef} className="list-sentinel" />
+          </div>
+        )}
+        </>
         )}
       </section>
 
@@ -1682,8 +1796,9 @@ export default function StatsPage() {
           </div>
         </div>
         {!collapsed.matchup && (
+        <>
         <div className={statsCardsClass}>
-          {sortedMatchupStats.map((row) => {
+          {visibleMatchupStats.map((row) => {
             const games = Number(row.games || 0);
             const wins = Number(row.wins || 0);
             const draws = Number(row.draws || 0);
@@ -1720,10 +1835,17 @@ export default function StatsPage() {
               </div>
             );
           })}
-          {stats.matchupStats.length === 0 && !loading && (
+          {sortedMatchupStats.length === 0 && !loading && (
             <div className="stats-card empty">No matchup stats yet.</div>
           )}
         </div>
+        {sortedMatchupStats.length > 0 && (
+          <div className="infinite-footer">
+            <div className="page-info">{visibleMatchupStats.length} / {sortedMatchupStats.length}</div>
+            <div ref={matchupSentinelRef} className="list-sentinel" />
+          </div>
+        )}
+        </>
         )}
       </section>
     </main>
