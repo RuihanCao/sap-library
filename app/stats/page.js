@@ -466,8 +466,10 @@ export default function StatsPage() {
       perkOrderValue: perkOrder,
       toySortValue: toySort,
       toyOrderValue: toyOrder
-    }
+    },
+    options = {}
   ) {
+    const { includePet = true } = options;
     const params = new URLSearchParams();
     if (nextFilters.scope) params.set("scope", nextFilters.scope);
     if (nextFilters.player) params.set("player", nextFilters.player);
@@ -486,7 +488,7 @@ export default function StatsPage() {
     if (nextFilters.itemPack) params.set("itemPack", nextFilters.itemPack);
     if (nextFilters.minTurn) params.set("minTurn", nextFilters.minTurn);
     if (nextFilters.maxTurn) params.set("maxTurn", nextFilters.maxTurn);
-    if (nextFilters.pet?.length) params.set("pet", nextFilters.pet.join(","));
+    if (includePet && nextFilters.pet?.length) params.set("pet", nextFilters.pet.join(","));
     if (nextFilters.petLevel) params.set("petLevel", nextFilters.petLevel);
     if (nextFilters.perk?.length) params.set("perk", nextFilters.perk.join(","));
     if (nextFilters.toy?.length) params.set("toy", nextFilters.toy.join(","));
@@ -509,10 +511,16 @@ export default function StatsPage() {
     return params;
   }
 
+  function syncStatsUrl(nextFilters = filters, uiState) {
+    const params = buildStatsParams(nextFilters, uiState, { includePet: true });
+    const nextUrl = params.toString() ? `?${params.toString()}` : window.location.pathname;
+    window.history.replaceState({}, "", nextUrl);
+  }
+
   async function loadStats(nextFilters = filters, options = {}) {
     const params = options.paramsOverride
       ? new URLSearchParams(options.paramsOverride.toString())
-      : buildStatsParams(nextFilters, options.uiState);
+      : buildStatsParams(nextFilters, options.uiState, { includePet: false });
 
     setLoading(true);
     try {
@@ -531,7 +539,8 @@ export default function StatsPage() {
       });
 
       if (!options.skipUrlSync) {
-        const nextUrl = params.toString() ? `?${params.toString()}` : window.location.pathname;
+        const urlParams = buildStatsParams(nextFilters, options.uiState, { includePet: true });
+        const nextUrl = urlParams.toString() ? `?${urlParams.toString()}` : window.location.pathname;
         window.history.replaceState({}, "", nextUrl);
       }
     } finally {
@@ -605,7 +614,7 @@ export default function StatsPage() {
       perkOrderValue: nextPerkOrder,
       toySortValue: nextToySort,
       toyOrderValue: nextToyOrder
-    });
+    }, { includePet: false });
 
     loadStats(nextFilters, { paramsOverride: hydratedParams, skipUrlSync: true });
   }, []);
@@ -800,11 +809,21 @@ export default function StatsPage() {
       return String(a.opponent_pack || "").localeCompare(String(b.opponent_pack || ""));
     });
   }, [stats.matchupStats]);
+  const filteredPetStats = useMemo(() => {
+    const minSampleValue = Number(filters.minSample);
+    const minSampleThreshold = Number.isFinite(minSampleValue) ? Math.max(0, minSampleValue) : 10;
+    const selectedPets = new Set(filters.pet || []);
+    return (stats.petStats || []).filter((row) => {
+      if (selectedPets.size && !selectedPets.has(row.pet_name)) return false;
+      const gamesWith = Number(row.games_with || 0);
+      return gamesWith >= minSampleThreshold || selectedPets.has(row.pet_name);
+    });
+  }, [stats.petStats, filters.pet, filters.minSample]);
   const sortedPetStats = useMemo(() => {
-    return expandWithMeta(stats.petStats, "pet_name", petMetaMap, petSort).sort((a, b) =>
+    return expandWithMeta(filteredPetStats, "pet_name", petMetaMap, petSort).sort((a, b) =>
       compareRows(a, b, petSort, petOrder, stats.totalGames, "pet_name")
     );
-  }, [stats.petStats, stats.totalGames, petSort, petOrder, petMetaMap, itemPackFilter]);
+  }, [filteredPetStats, stats.totalGames, petSort, petOrder, petMetaMap, itemPackFilter]);
   const sortedPerkStats = useMemo(() => {
     return expandWithMeta(stats.perkStats, "perk_name", perkMetaMap, perkSort).sort((a, b) =>
       compareRows(a, b, perkSort, perkOrder, stats.totalGames, "perk_name")
@@ -816,8 +835,8 @@ export default function StatsPage() {
     );
   }, [stats.toyStats, stats.totalGames, toySort, toyOrder, toyMetaMap, itemPackFilter]);
   const totalPetCount = useMemo(
-    () => (stats.petStats || []).reduce((sum, row) => sum + Number(row.games_with || 0), 0),
-    [stats.petStats]
+    () => (filteredPetStats || []).reduce((sum, row) => sum + Number(row.games_with || 0), 0),
+    [filteredPetStats]
   );
   const totalPerkCount = useMemo(
     () => (stats.perkStats || []).reduce((sum, row) => sum + Number(row.games_with || 0), 0),
@@ -1294,7 +1313,7 @@ export default function StatsPage() {
               onChange={(value) => {
                 const next = { ...filters, pet: value };
                 setFilters(next);
-                loadStats(next);
+                syncStatsUrl(next);
               }}
               placeholder="Search pets..."
             />
@@ -1396,7 +1415,7 @@ export default function StatsPage() {
               </div>
             );
           })}
-          {stats.petStats.length === 0 && !loading && (
+          {sortedPetStats.length === 0 && !loading && (
             <div className="stats-card empty">No pet stats yet.</div>
           )}
         </div>
