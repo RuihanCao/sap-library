@@ -7,6 +7,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "bot:discord": "node services/discord-bot/index.js",
     "backfill:game-version": "node scripts/backfill-game-version.js",
     "backfill:ranks-v45": "node scripts/backfill-ranks-v45.js",
     "backfill:ranks-recent": "node scripts/backfill-ranks-v45.js --recent-hours=1 --all-versions"
@@ -16,6 +17,7 @@
   "dependencies": {
     "@napi-rs/canvas": "^0.1.92",
     "@vercel/analytics": "^1.6.1",
+    "discord.js": "^14.25.1",
     "dotenv": "^17.2.0",
     "next": "^15.1.6",
     "pg": "^8.11.5",

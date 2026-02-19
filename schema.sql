@@ -65,6 +65,13 @@ create table if not exists hidden_players (
   hidden_at timestamptz not null default now()
 );
 
+create table if not exists player_tags (
+  player_id text primary key,
+  tags text[] not null default '{}'::text[],
+  updated_by text,
+  updated_at timestamptz not null default now()
+);
+
 create index if not exists idx_replays_participation_id on replays(participation_id);
 create unique index if not exists idx_replays_match_id_unique on replays(match_id) where match_id is not null;
 create index if not exists idx_replays_match_id on replays(match_id);
@@ -95,3 +102,5 @@ create index if not exists idx_pets_replay_turn_side_perk on pets(replay_id, tur
 create index if not exists idx_pets_replay_turn_side_toy on pets(replay_id, turn_number, side, toy) where toy is not null;
 create index if not exists idx_replays_stats_scope on replays(match_type, pack, opponent_pack, created_at desc);
 create index if not exists idx_hidden_players_hidden_at on hidden_players(hidden_at desc);
+create index if not exists idx_player_tags_tags on player_tags using gin (tags);
+create index if not exists idx_player_tags_updated_at on player_tags(updated_at desc);
