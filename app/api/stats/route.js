@@ -731,8 +731,8 @@ export async function GET(req) {
       (select coalesce(json_agg(row_to_json(ps) order by ps.pack), '[]'::json) from pack_stats_agg ps where ps.rate_games >= $MIN_SAMPLE_SIZE) as pack_stats,
       (select coalesce(json_agg(row_to_json(ms) order by ms.games desc, ms.pack asc, ms.opponent_pack asc), '[]'::json) from matchup_stats_agg ms where ms.rate_games >= $MIN_SAMPLE_SIZE or ms.pack = ms.opponent_pack) as matchup_stats,
       (select coalesce(json_agg(row_to_json(ps) order by ps.games_with desc, ps.pet_name asc), '[]'::json) from pet_stats_agg ps where true${minEndOnPetClause}) as pet_stats,
-      (select coalesce(json_agg(row_to_json(ps) order by ps.games_with desc, ps.perk_name asc), '[]'::json) from perk_stats_agg ps where ps.games_with >= $MIN_SAMPLE_SIZE${minEndOnPerkClause}) as perk_stats,
-      (select coalesce(json_agg(row_to_json(ts) order by ts.games_with desc, ts.toy_name asc), '[]'::json) from toy_stats_agg ts where ts.games_with >= $MIN_SAMPLE_SIZE${minEndOnToyClause}) as toy_stats
+      (select coalesce(json_agg(row_to_json(ps) order by ps.games_with desc, ps.perk_name asc), '[]'::json) from perk_stats_agg ps where true${minEndOnPerkClause}) as perk_stats,
+      (select coalesce(json_agg(row_to_json(ts) order by ts.games_with desc, ts.toy_name asc), '[]'::json) from toy_stats_agg ts where true${minEndOnToyClause}) as toy_stats
   `;
 
   const battleSql = `
@@ -975,7 +975,6 @@ export async function GET(req) {
           sum(case when pr.outcome = 3 then 1 else 0 end)::int as draws_with
         from perk_rounds pr
         group by pr.perk_name
-        having count(*) >= $MIN_SAMPLE_SIZE
         order by count(*) desc, pr.perk_name asc
       ) perk_stats) as perk_stats,
       (select coalesce(json_agg(row_to_json(toy_stats)), '[]'::json) from (
@@ -990,7 +989,6 @@ export async function GET(req) {
           sum(case when tr.outcome = 3 then 1 else 0 end)::int as draws_with
         from toy_rounds tr
         group by tr.toy_name
-        having count(*) >= $MIN_SAMPLE_SIZE
         order by count(*) desc, tr.toy_name asc
       ) toy_stats) as toy_stats
   `;

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { PackInlineName, PackMatchupInline } from "@/app/components/pack-inline";
 import { SemanticLabel } from "@/app/components/semantic-label";
 import { getPackSprite } from "@/lib/packSprites";
+import { fetchClientMeta } from "@/lib/clientMeta";
 
 const BUILD_BACKGROUNDS = [
   "AboveCloudsBuild.png",
@@ -282,26 +283,7 @@ export default function LeaderboardPage() {
   }, []);
 
   useEffect(() => {
-    fetch("/api/meta")
-      .then((res) => res.json())
-      .then((data) => setMeta({
-        pets: data.pets || [],
-        perks: data.perks || [],
-        toys: data.toys || [],
-        packs: data.packs || [],
-        versions: data.versions || [],
-        currentVersion: data.currentVersion || null
-      }))
-      .catch(() =>
-        setMeta({
-          pets: [],
-          perks: [],
-          toys: [],
-          packs: [],
-          versions: [],
-          currentVersion: null
-        })
-      );
+    fetchClientMeta().then(setMeta);
   }, []);
 
   function buildListParams(nextFilters = filters, nextPage = page, nextPlayerId = selectedPlayerId) {

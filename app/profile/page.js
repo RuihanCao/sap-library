@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { PackInlineName, PackMatchupInline } from "@/app/components/pack-inline";
 import { SemanticLabel } from "@/app/components/semantic-label";
+import { fetchClientMeta } from "@/lib/clientMeta";
 
 const PROFILE_NAME_KEY = "sap-library.profileName";
 const PROFILE_ID_KEY = "sap-library.profileId";
@@ -275,26 +276,7 @@ export default function ProfilePage() {
   }, []);
 
   useEffect(() => {
-    fetch("/api/meta")
-      .then((res) => res.json())
-      .then((data) => setMeta({
-        pets: data.pets || [],
-        perks: data.perks || [],
-        toys: data.toys || [],
-        packs: data.packs || [],
-        versions: data.versions || [],
-        currentVersion: data.currentVersion || null
-      }))
-      .catch(() =>
-        setMeta({
-          pets: [],
-          perks: [],
-          toys: [],
-          packs: [],
-          versions: [],
-          currentVersion: null
-        })
-      );
+    fetchClientMeta().then(setMeta);
   }, []);
 
   useEffect(() => {

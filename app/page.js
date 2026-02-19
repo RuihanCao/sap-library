@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { PackInlineName, PackMatchupInline } from "@/app/components/pack-inline";
+import { fetchClientMeta } from "@/lib/clientMeta";
 
 const BUILD_BACKGROUNDS = [
   "AboveCloudsBuild.png",
@@ -385,19 +386,7 @@ export default function Page() {
   }, []);
 
   useEffect(() => {
-    fetch("/api/meta")
-      .then((res) => res.json())
-      .then((data) =>
-        setMeta({
-          pets: data.pets || [],
-          perks: data.perks || [],
-          toys: data.toys || [],
-          packs: data.packs || [],
-          versions: data.versions || [],
-          currentVersion: data.currentVersion || null
-        })
-      )
-      .catch(() => setMeta({ pets: [], perks: [], toys: [], packs: [], versions: [], currentVersion: null }));
+    fetchClientMeta().then(setMeta);
   }, []);
 
   useEffect(() => {
@@ -870,7 +859,10 @@ export default function Page() {
   function switchExploreView(nextView) {
     const normalized = nextView === "list" ? "list" : "card";
     setExploreViewMode(normalized);
-    runSearch(null, 1, { exploreViewValue: normalized });
+    const params = new URLSearchParams(window.location.search);
+    params.set("uiView", normalized);
+    const nextUrl = params.toString() ? `?${params.toString()}` : window.location.pathname;
+    window.history.replaceState({}, "", nextUrl);
   }
 
   async function copyShareLink() {
