@@ -1,5 +1,4 @@
 import "./globals.css";
-import { Analytics } from "@vercel/analytics/react";
 
 export const metadata = {
   title: "Sap Library",
@@ -23,7 +22,6 @@ export default function RootLayout({ children }) {
     <html lang="en" suppressHydrationWarning>
       <body suppressHydrationWarning>
         {children}
-        <Analytics />
       </body>
     </html>
   );

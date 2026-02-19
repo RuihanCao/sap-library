@@ -880,6 +880,46 @@ button:hover:not(:disabled) {
   display: block;
 }
 
+.modal-image-helper {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 2px 0 8px;
+}
+
+.modal-image-wrap-interactive {
+  position: relative;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.modal-image-clickable {
+  cursor: pointer;
+}
+
+.modal-image-clickable:hover {
+  box-shadow: 0 0 0 1px rgba(58, 167, 201, 0.45), 0 10px 20px rgba(16, 28, 42, 0.12);
+}
+
+.modal-image-loading {
+  cursor: progress;
+  opacity: 0.88;
+}
+
+.modal-turn-hover {
+  position: absolute;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+  border-top: 1px solid rgba(58, 167, 201, 0.7);
+  border-bottom: 1px solid rgba(58, 167, 201, 0.7);
+  background: linear-gradient(90deg, rgba(58, 167, 201, 0.06), rgba(58, 167, 201, 0.16), rgba(58, 167, 201, 0.06));
+  box-shadow:
+    0 7px 18px rgba(9, 16, 27, 0.18),
+    0 0 0 1px rgba(58, 167, 201, 0.18) inset;
+  transform: scale(1.008);
+  transition: top 90ms ease, height 90ms ease, opacity 90ms ease;
+}
+
 .muted {
   color: var(--muted);
   font-size: 14px;

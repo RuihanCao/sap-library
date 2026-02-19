@@ -11,6 +11,8 @@ const PROFILE_ID_KEY = "sap-library.profileId";
 const GOAT_PLAYER_ID = "310a80b8-0321-4e63-8924-eb462cce9221";
 const GOAT_TARGET_TURN = 11;
 const GOAT_TARGET_PACK = "Turtle";
+const REPLAY_IMAGE_HEADER_HEIGHT = 36;
+const REPLAY_IMAGE_ROW_HEIGHT = 125;
 
 const BUILD_BACKGROUNDS = [
   "AboveCloudsBuild.png",
@@ -253,6 +255,9 @@ export default function ProfilePage() {
   const [modalLoading, setModalLoading] = useState(false);
   const [modalData, setModalData] = useState(null);
   const [modalShareStatus, setModalShareStatus] = useState("");
+  const [modalCalcStatus, setModalCalcStatus] = useState("");
+  const [modalCalcLoading, setModalCalcLoading] = useState(false);
+  const [modalCalcHover, setModalCalcHover] = useState(null);
   const [goatOpen, setGoatOpen] = useState(false);
   const [goatLoading, setGoatLoading] = useState(false);
   const [goatData, setGoatData] = useState(null);
@@ -262,6 +267,7 @@ export default function ProfilePage() {
   const suggestionAbortRef = useRef(null);
   const gamesLoadingRef = useRef(false);
   const inFlightGamePagesRef = useRef(new Set());
+  const modalCalcStatusTimeoutRef = useRef(null);
   const replayImageVersion = "2026-02-12-text-fix";
 
   useEffect(() => {
@@ -301,8 +307,30 @@ export default function ProfilePage() {
       if (suggestionAbortRef.current) {
         suggestionAbortRef.current.abort();
       }
+      if (modalCalcStatusTimeoutRef.current) {
+        clearTimeout(modalCalcStatusTimeoutRef.current);
+      }
     };
   }, []);
+
+  function clearModalCalcStatusTimeout() {
+    if (!modalCalcStatusTimeoutRef.current) {
+      return;
+    }
+    clearTimeout(modalCalcStatusTimeoutRef.current);
+    modalCalcStatusTimeoutRef.current = null;
+  }
+
+  function setModalCalcStatusWithTimeout(message, timeoutMs = 1600) {
+    clearModalCalcStatusTimeout();
+    setModalCalcStatus(message);
+    if (timeoutMs > 0) {
+      modalCalcStatusTimeoutRef.current = setTimeout(() => {
+        setModalCalcStatus("");
+        modalCalcStatusTimeoutRef.current = null;
+      }, timeoutMs);
+    }
+  }
 
   function buildParams(nextFilters = filters, playerIdValue = selectedPlayerId) {
     const params = new URLSearchParams();
@@ -451,6 +479,10 @@ export default function ProfilePage() {
   function closeModal() {
     setModalOpen(false);
     setModalShareStatus("");
+    setModalCalcLoading(false);
+    setModalCalcHover(null);
+    clearModalCalcStatusTimeout();
+    setModalCalcStatus("");
   }
 
   async function loadGoatTurnStats() {
@@ -551,6 +583,10 @@ export default function ProfilePage() {
     setModalLoading(true);
     setModalData(null);
     setModalShareStatus("");
+    setModalCalcLoading(false);
+    setModalCalcHover(null);
+    clearModalCalcStatusTimeout();
+    setModalCalcStatus("");
     try {
       const res = await fetch(`/api/replays/${replayId}`);
       const data = await res.json();
@@ -564,6 +600,114 @@ export default function ProfilePage() {
     } finally {
       setModalLoading(false);
     }
+  }
+
+  function getModalImageTurnMatch(image, clientY) {
+    const turnCount = Number(modalData?.stats?.turns || 0);
+    if (!Number.isFinite(turnCount) || turnCount <= 0) {
+      return null;
+    }
+
+    const rect = image.getBoundingClientRect();
+    if (!rect.height) {
+      return null;
+    }
+
+    const clickY = clientY - rect.top;
+    const renderedY = Math.max(0, Math.min(rect.height, clickY));
+    const naturalHeight = image.naturalHeight || rect.height;
+    const imageY = (renderedY / rect.height) * naturalHeight;
+    const inferredHeaderHeight = naturalHeight - turnCount * REPLAY_IMAGE_ROW_HEIGHT;
+    const headerHeight = Number.isFinite(inferredHeaderHeight)
+      ? Math.max(0, Math.min(REPLAY_IMAGE_HEADER_HEIGHT, inferredHeaderHeight))
+      : 0;
+
+    if (imageY < headerHeight) {
+      return null;
+    }
+
+    const turn = Math.floor((imageY - headerHeight) / REPLAY_IMAGE_ROW_HEIGHT) + 1;
+    if (!Number.isFinite(turn) || turn < 1 || turn > turnCount) {
+      return null;
+    }
+
+    const scale = rect.height / naturalHeight;
+    const renderedHeaderHeight = headerHeight * scale;
+    const renderedRowHeight = REPLAY_IMAGE_ROW_HEIGHT * scale;
+    return {
+      turn,
+      top: renderedHeaderHeight + (turn - 1) * renderedRowHeight,
+      height: renderedRowHeight
+    };
+  }
+
+  async function openCalculatorForTurn(turn) {
+    if (!modalData?.replay?.id || !Number.isFinite(turn) || turn < 1) {
+      return;
+    }
+    if (modalCalcLoading) {
+      return;
+    }
+
+    const popup = window.open("", "_blank");
+    if (!popup) {
+      setModalCalcStatusWithTimeout("Popup blocked. Allow popups to open SAP Calculator.", 2500);
+      return;
+    }
+
+    setModalCalcLoading(true);
+    setModalCalcStatusWithTimeout(`Loading SAP Calculator for turn ${turn}...`, 0);
+
+    try {
+      const res = await fetch(`/api/replays/${modalData.replay.id}/calculator?turn=${turn}`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.url) {
+        popup.close();
+        setModalCalcStatusWithTimeout(data?.error || "Could not generate SAP Calculator link.", 2200);
+        return;
+      }
+
+      popup.opener = null;
+      popup.location.href = data.url;
+      setModalCalcStatusWithTimeout(`Opened SAP Calculator for turn ${turn}.`);
+    } catch {
+      popup.close();
+      setModalCalcStatusWithTimeout("Could not open SAP Calculator link.", 2200);
+    } finally {
+      setModalCalcLoading(false);
+    }
+  }
+
+  function handleModalImageClick(event) {
+    const match = getModalImageTurnMatch(event.currentTarget, event.clientY);
+    if (!match) {
+      setModalCalcStatusWithTimeout("Click a turn row in the replay image.", 1400);
+      return;
+    }
+    openCalculatorForTurn(match.turn);
+  }
+
+  function handleModalImageMouseMove(event) {
+    const match = getModalImageTurnMatch(event.currentTarget, event.clientY);
+    if (!match) {
+      setModalCalcHover(null);
+      return;
+    }
+    setModalCalcHover((prev) => {
+      if (
+        prev &&
+        prev.turn === match.turn &&
+        Math.abs(prev.top - match.top) < 0.25 &&
+        Math.abs(prev.height - match.height) < 0.25
+      ) {
+        return prev;
+      }
+      return match;
+    });
+  }
+
+  function handleModalImageMouseLeave() {
+    setModalCalcHover(null);
   }
 
   function switchGamesView(nextView) {
@@ -1349,6 +1493,7 @@ export default function ProfilePage() {
               </div>
             </div>
             {modalShareStatus ? <div className="status">{modalShareStatus}</div> : null}
+            {modalCalcStatus ? <div className="status">{modalCalcStatus}</div> : null}
             {modalLoading && <div className="muted">Loading...</div>}
             {!modalLoading && modalData?.error && <div className="muted">{modalData.error}</div>}
             {!modalLoading && modalData?.replay && (
@@ -1452,11 +1597,24 @@ export default function ProfilePage() {
                     </div>
                   )}
                 </div>
-                <img
-                  className="modal-image"
-                  src={`/api/replays/${modalData.replay.id}/image?v=${encodeURIComponent(modalData.replay.created_at || replayImageVersion)}`}
-                  alt="Replay"
-                />
+                <div className="modal-image-helper">Hover and click a turn row to open SAP Calculator for that turn.</div>
+                <div className="modal-image-wrap-interactive">
+                  <img
+                    className={`modal-image modal-image-clickable ${modalCalcLoading ? "modal-image-loading" : ""}`}
+                    src={`/api/replays/${modalData.replay.id}/image?v=${encodeURIComponent(modalData.replay.created_at || replayImageVersion)}`}
+                    alt="Replay"
+                    title="Click a turn row to open SAP Calculator"
+                    onClick={handleModalImageClick}
+                    onMouseMove={handleModalImageMouseMove}
+                    onMouseLeave={handleModalImageMouseLeave}
+                  />
+                  {modalCalcHover ? (
+                    <div
+                      className="modal-turn-hover"
+                      style={{ top: `${modalCalcHover.top}px`, height: `${modalCalcHover.height}px` }}
+                    />
+                  ) : null}
+                </div>
               </>
             )}
           </div>
