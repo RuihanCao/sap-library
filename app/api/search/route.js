@@ -91,6 +91,8 @@ export async function GET(req) {
   const minRankMode = (searchParams.get("minRankMode") || "any").toLowerCase();
   const packA = searchParams.get("packA");
   const packB = searchParams.get("packB");
+  const profilePlayerPack = searchParams.get("profilePlayerPack");
+  const profileOpponentPack = searchParams.get("profileOpponentPack");
   const excludeA = searchParams.get("excludeA");
   const excludeB = searchParams.get("excludeB");
   const mirrorMatch = searchParams.get("mirrorMatch") === "true"; // legacy support
@@ -261,6 +263,52 @@ export async function GET(req) {
   } else if (packB) {
     values.push(packB);
     clauses.push(`(r.pack = $${values.length} or r.opponent_pack = $${values.length})`);
+  }
+
+  // Profile-scoped pack filters: map packs to the selected player's side.
+  if (profilePlayerPack || profileOpponentPack) {
+    if (playerIdExactParamIndex !== null) {
+      let profilePlayerPackIndex = null;
+      let profileOpponentPackIndex = null;
+      if (profilePlayerPack) {
+        values.push(profilePlayerPack);
+        profilePlayerPackIndex = values.length;
+      }
+      if (profileOpponentPack) {
+        values.push(profileOpponentPack);
+        profileOpponentPackIndex = values.length;
+      }
+
+      const playerSideChecks = [];
+      const opponentSideChecks = [];
+
+      if (profilePlayerPackIndex !== null) {
+        playerSideChecks.push(`r.pack = $${profilePlayerPackIndex}`);
+        opponentSideChecks.push(`r.opponent_pack = $${profilePlayerPackIndex}`);
+      }
+      if (profileOpponentPackIndex !== null) {
+        playerSideChecks.push(`r.opponent_pack = $${profileOpponentPackIndex}`);
+        opponentSideChecks.push(`r.pack = $${profileOpponentPackIndex}`);
+      }
+
+      const playerSideSuffix = playerSideChecks.length ? ` and ${playerSideChecks.join(" and ")}` : "";
+      const opponentSideSuffix = opponentSideChecks.length ? ` and ${opponentSideChecks.join(" and ")}` : "";
+      clauses.push(`(
+        (${playerIdExpr} = $${playerIdExactParamIndex}${playerSideSuffix})
+        or (${opponentIdExpr} = $${playerIdExactParamIndex}${opponentSideSuffix})
+      )`);
+    } else if (profilePlayerPack && profileOpponentPack) {
+      values.push(profilePlayerPack, profileOpponentPack);
+      const a = values.length - 1;
+      const b = values.length;
+      clauses.push(
+        `((r.pack = $${a} and r.opponent_pack = $${b}) or (r.pack = $${b} and r.opponent_pack = $${a}))`
+      );
+    } else {
+      const singlePack = profilePlayerPack || profileOpponentPack;
+      values.push(singlePack);
+      clauses.push(`(r.pack = $${values.length} or r.opponent_pack = $${values.length})`);
+    }
   }
 
   if (excludeA && excludeB) {

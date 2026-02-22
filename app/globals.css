@@ -252,6 +252,43 @@ button:hover:not(:disabled) {
   align-items: start;
 }
 
+.filter-categories {
+  display: grid;
+  gap: 14px;
+}
+
+.filter-category {
+  border: 1px dashed rgba(58, 167, 201, 0.3);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.66);
+  padding: 14px;
+}
+
+.filter-category .filters {
+  gap: 14px;
+}
+
+.filter-category-head {
+  margin-bottom: 12px;
+  display: grid;
+  gap: 4px;
+}
+
+.filter-category-head h3 {
+  margin: 0;
+  font-family: "Lapsus Pro", "Inter", sans-serif;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink);
+}
+
+.filter-category-head p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .advanced-toggle input {
   margin-right: 8px;
 }
@@ -333,6 +370,10 @@ button:hover:not(:disabled) {
 
 .actions {
   margin-top: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
 }
 
 .preset-row {
@@ -1807,6 +1848,49 @@ button:hover:not(:disabled) {
 
 .leaderboard-detail-block h3 {
   margin-bottom: 10px;
+}
+
+.leaderboard-block-head {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.leaderboard-block-head h3 {
+  margin: 0;
+}
+
+.leaderboard-turn-toggle {
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink);
+  font: inherit;
+  font-weight: inherit;
+  line-height: 1.2;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.leaderboard-turn-toggle:hover:not(:disabled) {
+  transform: none;
+  background: transparent;
+  box-shadow: none;
+  color: var(--accent);
+}
+
+.leaderboard-turn-toggle:focus-visible {
+  outline: 2px solid rgba(58, 167, 201, 0.65);
+  outline-offset: 2px;
+}
+
+.leaderboard-turn-toggle-indicator {
+  font-size: 36px;
+  line-height: 1;
 }
 
 .leaderboard-subtable {

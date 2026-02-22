@@ -128,6 +128,13 @@ const DEFAULT_FILTERS = {
   pageSize: "25"
 };
 
+const DEFAULT_FILTER_SECTION_VISIBILITY = {
+  general: false,
+  matchup: false,
+  thresholds: false,
+  items: false
+};
+
 function pickTheme(name) {
   const lower = name.toLowerCase();
   if (lower.includes("arctic") || lower.includes("snow") || lower.includes("winter") || lower.includes("moon")) {
@@ -253,6 +260,7 @@ export default function LeaderboardPage() {
     currentVersion: null
   });
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
+  const [visibleFilterSections, setVisibleFilterSections] = useState(DEFAULT_FILTER_SECTION_VISIBILITY);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [players, setPlayers] = useState([]);
@@ -261,7 +269,11 @@ export default function LeaderboardPage() {
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailModalOpen, setDetailModalOpen] = useState(false);
+  const [perTurnCollapsed, setPerTurnCollapsed] = useState(true);
   const listSentinelRef = useRef(null);
+  const autoSearchTimeoutRef = useRef(null);
+  const autoSearchReadyRef = useRef(false);
+  const lastAppliedFilterKeyRef = useRef("");
 
   const packOptions = useMemo(
     () => (meta.packs || []).filter((pack) => !EXCLUDED_PACKS.includes(pack.name)),
@@ -310,6 +322,12 @@ export default function LeaderboardPage() {
     return params;
   }
 
+  function clearAutoSearchTimeout() {
+    if (!autoSearchTimeoutRef.current) return;
+    clearTimeout(autoSearchTimeoutRef.current);
+    autoSearchTimeoutRef.current = null;
+  }
+
   function buildDetailParams(nextFilters = filters) {
     const params = new URLSearchParams();
     if (nextFilters.scope) params.set("scope", nextFilters.scope);
@@ -352,6 +370,9 @@ export default function LeaderboardPage() {
   async function loadLeaderboard(nextFilters = filters, nextPage = page, nextPlayerId = selectedPlayerId, options = {}) {
     if (loading && options.append) return;
     const params = buildListParams(nextFilters, nextPage, nextPlayerId);
+    if (!options.append) {
+      lastAppliedFilterKeyRef.current = buildListParams(nextFilters, 1, nextPlayerId).toString();
+    }
     setLoading(true);
     try {
       const res = await fetch(`/api/leaderboard?${params.toString()}`);
@@ -412,8 +433,29 @@ export default function LeaderboardPage() {
     setFilters(nextFilters);
     setSelectedPlayerId(nextPlayerId);
     setDetailModalOpen(Boolean(nextPlayerId));
-    loadLeaderboard(nextFilters, nextPage, nextPlayerId, { skipUrlSync: true });
+    autoSearchReadyRef.current = false;
+    loadLeaderboard(nextFilters, nextPage, nextPlayerId, { skipUrlSync: true }).finally(() => {
+      autoSearchReadyRef.current = true;
+    });
+
+    return () => {
+      clearAutoSearchTimeout();
+      autoSearchReadyRef.current = false;
+    };
   }, []);
+
+  useEffect(() => {
+    if (!autoSearchReadyRef.current) return;
+    clearAutoSearchTimeout();
+    const nextKey = buildListParams(filters, 1, selectedPlayerId).toString();
+    autoSearchTimeoutRef.current = setTimeout(() => {
+      autoSearchTimeoutRef.current = null;
+      if (nextKey === lastAppliedFilterKeyRef.current) return;
+      loadLeaderboard(filters, 1, selectedPlayerId);
+    }, 1500);
+
+    return () => clearAutoSearchTimeout();
+  }, [filters]);
 
   useEffect(() => {
     const onKeyDown = (event) => {
@@ -446,10 +488,12 @@ export default function LeaderboardPage() {
 
   function submitSearch(event) {
     event.preventDefault();
+    clearAutoSearchTimeout();
     loadLeaderboard(filters, 1, selectedPlayerId);
   }
 
   function resetFilters() {
+    clearAutoSearchTimeout();
     setFilters(DEFAULT_FILTERS);
     setSelectedPlayerId("");
     setDetail(null);
@@ -457,6 +501,7 @@ export default function LeaderboardPage() {
   }
 
   function selectPlayer(playerId) {
+    setPerTurnCollapsed(true);
     setSelectedPlayerId(playerId);
     setDetailModalOpen(true);
     loadDetail(playerId);
@@ -465,6 +510,7 @@ export default function LeaderboardPage() {
   }
 
   function toggleSort(sortKey) {
+    clearAutoSearchTimeout();
     const nextOrder =
       filters.sort === sortKey
         ? (filters.order === "asc" ? "desc" : "asc")
@@ -487,6 +533,10 @@ export default function LeaderboardPage() {
     window.history.replaceState({}, "", `?${nextParams.toString()}`);
   }
 
+  function toggleFilterSection(sectionKey) {
+    setVisibleFilterSections((prev) => ({ ...prev, [sectionKey]: !prev[sectionKey] }));
+  }
+
   return (
     <main>
       <section className="hero">
@@ -505,84 +555,165 @@ export default function LeaderboardPage() {
 
       <section className="section filters-section">
         <div className="section-head">
-          <h2>Leaderboard Filters</h2>
+          <h2>Leaderboard Search</h2>
         </div>
         <form onSubmit={submitSearch}>
-          <div className="filters">
-            <div className="field">
-              <label>Scope</label>
-              <select
-                value={filters.scope}
-                onChange={(e) => setFilters({ ...filters, scope: e.target.value })}
-              >
-                <option value="game">Per Game</option>
-                <option value="battle">Per Round</option>
-              </select>
-            </div>
-            <div className="field">
-              <label>Player Search (Name/ID)</label>
-              <input
-                value={filters.search}
-                onChange={(e) => setFilters({ ...filters, search: e.target.value })}
-                placeholder="Search player name or user ID"
-              />
-            </div>
-            <div className="field">
-              <label>Min Match Threshold (1+)</label>
-              <input
-                type="number"
-                min={MIN_MATCH_THRESHOLD}
-                step="1"
-                value={filters.minMatches}
-                onChange={(e) => setFilters({ ...filters, minMatches: e.target.value })}
-                onBlur={(e) => setFilters({ ...filters, minMatches: normalizeMinMatches(e.target.value) })}
-                placeholder={String(DEFAULT_MIN_MATCH_THRESHOLD)}
-              />
-            </div>
-            <div className="field">
-              <label>Version</label>
-              <select
-                value={filters.version}
-                onChange={(e) => setFilters({ ...filters, version: e.target.value })}
-              >
-                <option value="current">
-                  Current
-                  {meta.currentVersion ? ` (${meta.currentVersion})` : ""}
-                </option>
-                <option value="all">All Versions</option>
-                {(meta.versions || []).map((version) => (
-                  <option key={version} value={version}>
-                    {version}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="field">
-              <label>Your Pack</label>
-              <select
-                value={filters.pack}
-                onChange={(e) => setFilters({ ...filters, pack: e.target.value })}
-              >
-                <option value="">Any</option>
-                {packOptions.map((pack) => (
-                  <option key={pack.id} value={pack.name}>{pack.name}</option>
-                ))}
-              </select>
-            </div>
-            <div className="field">
-              <label>Opponent Pack</label>
-              <select
-                value={filters.opponentPack}
-                onChange={(e) => setFilters({ ...filters, opponentPack: e.target.value })}
-              >
-                <option value="">Any</option>
-                {packOptions.map((pack) => (
-                  <option key={pack.id} value={pack.name}>{pack.name}</option>
-                ))}
-              </select>
-            </div>
-            {filters.scope === "battle" && (
-              <>
+          <div className="toggles">
+            <button
+              type="button"
+              className={visibleFilterSections.general ? "toggle active" : "toggle"}
+              onClick={() => toggleFilterSection("general")}
+            >
+              Scope + Player
+            </button>
+            <button
+              type="button"
+              className={visibleFilterSections.matchup ? "toggle active" : "toggle"}
+              onClick={() => toggleFilterSection("matchup")}
+            >
+              Pack Matchup
+            </button>
+            <button
+              type="button"
+              className={visibleFilterSections.thresholds ? "toggle active" : "toggle"}
+              onClick={() => toggleFilterSection("thresholds")}
+            >
+              Sample Size
+            </button>
+            <button
+              type="button"
+              className={visibleFilterSections.items ? "toggle with-icon active" : "toggle with-icon"}
+              onClick={() => toggleFilterSection("items")}
+            >
+              <img className="toggle-icon" src={petFilterSprite} alt="" />
+              Board + Turns
+            </button>
+          </div>
+          <div className="filter-categories">
+            {visibleFilterSections.general && (
+              <div className="filter-category">
+              <div className="filter-category-head">
+                <h3>Scope + Player</h3>
+                <p>Main search scope, player lookup, version, and page size.</p>
+              </div>
+              <div className="filters">
+                <div className="field">
+                  <label>Scope</label>
+                  <select
+                    value={filters.scope}
+                    onChange={(e) => setFilters({ ...filters, scope: e.target.value })}
+                  >
+                    <option value="game">Per Game</option>
+                    <option value="battle">Per Round</option>
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Player Name or ID</label>
+                  <input
+                    value={filters.search}
+                    onChange={(e) => setFilters({ ...filters, search: e.target.value })}
+                    placeholder="Search player name or user ID"
+                  />
+                </div>
+                <div className="field">
+                  <label>Version</label>
+                  <select
+                    value={filters.version}
+                    onChange={(e) => setFilters({ ...filters, version: e.target.value })}
+                  >
+                    <option value="current">
+                      Current
+                      {meta.currentVersion ? ` (${meta.currentVersion})` : ""}
+                    </option>
+                    <option value="all">All Versions</option>
+                    {(meta.versions || []).map((version) => (
+                      <option key={version} value={version}>
+                        {version}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Page Size</label>
+                  <select
+                    value={filters.pageSize}
+                    onChange={(e) => setFilters({ ...filters, pageSize: e.target.value })}
+                  >
+                    <option value="10">10</option>
+                    <option value="25">25</option>
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                  </select>
+                </div>
+              </div>
+              </div>
+            )}
+
+            {visibleFilterSections.matchup && (
+              <div className="filter-category">
+              <div className="filter-category-head">
+                <h3>Pack Matchup</h3>
+                <p>Restrict leaderboard rows to specific pack pairings.</p>
+              </div>
+              <div className="filters">
+                <div className="field">
+                  <label>Your Pack</label>
+                  <select
+                    value={filters.pack}
+                    onChange={(e) => setFilters({ ...filters, pack: e.target.value })}
+                  >
+                    <option value="">Any</option>
+                    {packOptions.map((pack) => (
+                      <option key={pack.id} value={pack.name}>{pack.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Opponent Pack</label>
+                  <select
+                    value={filters.opponentPack}
+                    onChange={(e) => setFilters({ ...filters, opponentPack: e.target.value })}
+                  >
+                    <option value="">Any</option>
+                    {packOptions.map((pack) => (
+                      <option key={pack.id} value={pack.name}>{pack.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              </div>
+            )}
+
+            {visibleFilterSections.thresholds && (
+              <div className="filter-category">
+              <div className="filter-category-head">
+                <h3>Sample Size</h3>
+                <p>Set a minimum match count for leaderboard rows.</p>
+              </div>
+              <div className="filters">
+                <div className="field">
+                  <label>Minimum Matches</label>
+                  <input
+                    type="number"
+                    min={MIN_MATCH_THRESHOLD}
+                    step="1"
+                    value={filters.minMatches}
+                    onChange={(e) => setFilters({ ...filters, minMatches: e.target.value })}
+                    onBlur={(e) => setFilters({ ...filters, minMatches: normalizeMinMatches(e.target.value) })}
+                    placeholder={String(DEFAULT_MIN_MATCH_THRESHOLD)}
+                  />
+                </div>
+              </div>
+              </div>
+            )}
+
+            {visibleFilterSections.items && (
+              <div className="filter-category">
+              <div className="filter-category-head">
+                <h3>Board + Turns</h3>
+                <p>Filter by turn window, board pieces (pets/perks/toys), and tags.</p>
+              </div>
+              <div className="filters">
                 <div className="field">
                   <label>
                     <SemanticLabel type="turn">Min Turn</SemanticLabel>
@@ -603,68 +734,57 @@ export default function LeaderboardPage() {
                     placeholder="15"
                   />
                 </div>
-              </>
+                <div className="field">
+                  <label>Tags</label>
+                  <input
+                    value={filters.tags}
+                    onChange={(e) => setFilters({ ...filters, tags: e.target.value })}
+                    placeholder="tournament, finals"
+                  />
+                </div>
+                <IconMultiSelect
+                  label={(
+                    <span className="multi-label-with-icon">
+                      <img src={petFilterSprite} alt="" className="multi-label-icon" />
+                      <span>Pet Filter</span>
+                    </span>
+                  )}
+                  options={meta.pets || []}
+                  selected={filters.pet}
+                  onChange={(value) => setFilters({ ...filters, pet: value })}
+                  placeholder="Search pets and add"
+                />
+                <IconMultiSelect
+                  label={(
+                    <span className="multi-label-with-icon">
+                      <img src={perkFilterSprite} alt="" className="multi-label-icon" />
+                      <span>Perk Filter</span>
+                    </span>
+                  )}
+                  options={meta.perks || []}
+                  selected={filters.perk}
+                  onChange={(value) => setFilters({ ...filters, perk: value })}
+                  placeholder="Search perks and add"
+                />
+                <IconMultiSelect
+                  label={(
+                    <span className="multi-label-with-icon">
+                      <img src={toyFilterSprite} alt="" className="multi-label-icon" />
+                      <span>Toy Filter</span>
+                    </span>
+                  )}
+                  options={meta.toys || []}
+                  selected={filters.toy}
+                  onChange={(value) => setFilters({ ...filters, toy: value })}
+                  placeholder="Search toys and add"
+                />
+              </div>
+              </div>
             )}
-            <div className="field">
-              <label>Page Size</label>
-              <select
-                value={filters.pageSize}
-                onChange={(e) => setFilters({ ...filters, pageSize: e.target.value })}
-              >
-                <option value="10">10</option>
-                <option value="25">25</option>
-                <option value="50">50</option>
-                <option value="100">100</option>
-              </select>
-            </div>
-            <div className="field">
-              <label>Tags (comma)</label>
-              <input
-                value={filters.tags}
-                onChange={(e) => setFilters({ ...filters, tags: e.target.value })}
-                placeholder="tournament, finals"
-              />
-            </div>
-            <IconMultiSelect
-              label={(
-                <span className="multi-label-with-icon">
-                  <img src={petFilterSprite} alt="" className="multi-label-icon" />
-                  <span>Pet Filter</span>
-                </span>
-              )}
-              options={meta.pets || []}
-              selected={filters.pet}
-              onChange={(value) => setFilters({ ...filters, pet: value })}
-              placeholder="Search pets and add"
-            />
-            <IconMultiSelect
-              label={(
-                <span className="multi-label-with-icon">
-                  <img src={perkFilterSprite} alt="" className="multi-label-icon" />
-                  <span>Perk Filter</span>
-                </span>
-              )}
-              options={meta.perks || []}
-              selected={filters.perk}
-              onChange={(value) => setFilters({ ...filters, perk: value })}
-              placeholder="Search perks and add"
-            />
-            <IconMultiSelect
-              label={(
-                <span className="multi-label-with-icon">
-                  <img src={toyFilterSprite} alt="" className="multi-label-icon" />
-                  <span>Toy Filter</span>
-                </span>
-              )}
-              options={meta.toys || []}
-              selected={filters.toy}
-              onChange={(value) => setFilters({ ...filters, toy: value })}
-              placeholder="Search toys and add"
-            />
           </div>
           <div className="actions">
-            <button type="submit">Search</button>
-            <button type="button" className="secondary" onClick={resetFilters}>Reset</button>
+            <button type="submit">Apply Now</button>
+            <button type="button" className="secondary" onClick={resetFilters}>Clear Filters</button>
           </div>
         </form>
       </section>
@@ -888,42 +1008,57 @@ export default function LeaderboardPage() {
                 </div>
 
                 <div className="leaderboard-detail-block">
-                  <h3>
-                    <SemanticLabel type="turn">Per Turn Metrics</SemanticLabel>
-                  </h3>
-                  <div className="leaderboard-subtable">
-                    <div className="leaderboard-subrow turn head">
-                      <span>
-                        <SemanticLabel type="turn">Turn</SemanticLabel>
-                      </span>
-                      <span>Rounds</span>
-                      <span>Wins</span>
-                      <span>Losses</span>
-                      <span>Draws</span>
-                      <span>Winrate</span>
-                      <span>Avg Rolls</span>
-                      <span className="gold-text">Avg Gold</span>
-                    </div>
-                    {detail.perTurn?.map((row) => (
-                      <div className="leaderboard-subrow turn" key={`turn-${row.turn_number}`}>
-                        <span>{row.turn_number}</span>
-                        <span>{Number(row.rounds || 0)}</span>
-                        <span className="rate-win">{Number(row.wins || 0)}</span>
-                        <span className="rate-loss">{Number(row.losses || 0)}</span>
-                        <span>{Number(row.draws || 0)}</span>
-                        <span className="rate-win">{pct(row.winrate)}</span>
-                        <span>{fixed(row.avg_rolls_per_turn)}</span>
-                        <span className="gold-text">{fixed(row.avg_gold_per_turn)}</span>
-                      </div>
-                    ))}
-                    {!detail.perTurn?.length && (
-                      <div className="leaderboard-subrow empty">
-                        <span>
-                          <SemanticLabel type="turn">No turn-level rows.</SemanticLabel>
+                  <div className="leaderboard-block-head">
+                    <h3>
+                      <button
+                        type="button"
+                        className="leaderboard-turn-toggle"
+                        onClick={() => setPerTurnCollapsed((prev) => !prev)}
+                        aria-expanded={!perTurnCollapsed}
+                        aria-controls="leaderboard-per-turn-metrics"
+                      >
+                        <SemanticLabel type="turn">Per Turn Metrics</SemanticLabel>
+                        <span className="leaderboard-turn-toggle-indicator" aria-hidden="true">
+                          {perTurnCollapsed ? "▸" : "▾"}
                         </span>
-                      </div>
-                    )}
+                      </button>
+                    </h3>
                   </div>
+                  {!perTurnCollapsed && (
+                    <div id="leaderboard-per-turn-metrics" className="leaderboard-subtable">
+                      <div className="leaderboard-subrow turn head">
+                        <span>
+                          <SemanticLabel type="turn">Turn</SemanticLabel>
+                        </span>
+                        <span>Rounds</span>
+                        <span>Wins</span>
+                        <span>Losses</span>
+                        <span>Draws</span>
+                        <span>Winrate</span>
+                        <span>Avg Rolls</span>
+                        <span className="gold-text">Avg Gold</span>
+                      </div>
+                      {detail.perTurn?.map((row) => (
+                        <div className="leaderboard-subrow turn" key={`turn-${row.turn_number}`}>
+                          <span>{row.turn_number}</span>
+                          <span>{Number(row.rounds || 0)}</span>
+                          <span className="rate-win">{Number(row.wins || 0)}</span>
+                          <span className="rate-loss">{Number(row.losses || 0)}</span>
+                          <span>{Number(row.draws || 0)}</span>
+                          <span className="rate-win">{pct(row.winrate)}</span>
+                          <span>{fixed(row.avg_rolls_per_turn)}</span>
+                          <span className="gold-text">{fixed(row.avg_gold_per_turn)}</span>
+                        </div>
+                      ))}
+                      {!detail.perTurn?.length && (
+                        <div className="leaderboard-subrow empty">
+                          <span>
+                            <SemanticLabel type="turn">No turn-level rows.</SemanticLabel>
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </>
             )}

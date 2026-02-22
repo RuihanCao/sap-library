@@ -208,6 +208,14 @@ const DEFAULT_STATS_FILTERS = {
   tags: ""
 };
 
+const DEFAULT_FILTER_SECTION_VISIBILITY = {
+  general: false,
+  matchup: false,
+  thresholds: false,
+  items: false,
+  advanced: false
+};
+
 function pickTheme(name) {
   const lower = name.toLowerCase();
   if (lower.includes("arctic") || lower.includes("snow") || lower.includes("winter") || lower.includes("moon") || lower.includes("space") || lower.includes("lunar")) {
@@ -383,6 +391,7 @@ export default function StatsPage() {
     currentVersion: null
   });
   const [filters, setFilters] = useState(DEFAULT_STATS_FILTERS);
+  const [visibleFilterSections, setVisibleFilterSections] = useState(DEFAULT_FILTER_SECTION_VISIBILITY);
   const [stats, setStats] = useState({
     totalGames: 0,
     totalBattles: 0,
@@ -427,6 +436,9 @@ export default function StatsPage() {
   const perkSentinelRef = useRef(null);
   const toySentinelRef = useRef(null);
   const matchupSentinelRef = useRef(null);
+  const autoSearchTimeoutRef = useRef(null);
+  const autoSearchReadyRef = useRef(false);
+  const lastAppliedNetworkKeyRef = useRef("");
 
   useEffect(() => {
     if (!BUILD_BACKGROUNDS.length) return;
@@ -451,6 +463,12 @@ export default function StatsPage() {
   const perkFilterSprite = pickFilterSprite(meta.perks, FILTER_FALLBACK_SPRITES.perk);
   const toyFilterSprite = pickFilterSprite(meta.toys, FILTER_FALLBACK_SPRITES.toy);
   const turnFilterSprite = FILTER_FALLBACK_SPRITES.turn;
+
+  function clearAutoSearchTimeout() {
+    if (!autoSearchTimeoutRef.current) return;
+    clearTimeout(autoSearchTimeoutRef.current);
+    autoSearchTimeoutRef.current = null;
+  }
 
   function buildStatsParams(
     nextFilters = filters,
@@ -513,11 +531,32 @@ export default function StatsPage() {
     window.history.replaceState({}, "", nextUrl);
   }
 
+  function buildNetworkFilterKey(nextFilters = filters) {
+    const params = buildStatsParams(nextFilters, {
+      viewModeValue: viewMode,
+      petSortValue: petSort,
+      petOrderValue: petOrder,
+      perkSortValue: perkSort,
+      perkOrderValue: perkOrder,
+      toySortValue: toySort,
+      toyOrderValue: toyOrder
+    }, { includePet: false, includePerk: false, includeToy: false });
+    params.delete("uiView");
+    params.delete("uiPetSort");
+    params.delete("uiPetOrder");
+    params.delete("uiPerkSort");
+    params.delete("uiPerkOrder");
+    params.delete("uiToySort");
+    params.delete("uiToyOrder");
+    return params.toString();
+  }
+
   async function loadStats(nextFilters = filters, options = {}) {
     const params = options.paramsOverride
       ? new URLSearchParams(options.paramsOverride.toString())
       : buildStatsParams(nextFilters, options.uiState, { includePet: false, includePerk: false, includeToy: false });
 
+    lastAppliedNetworkKeyRef.current = buildNetworkFilterKey(nextFilters);
     setLoading(true);
     try {
       const res = await fetch(`/api/stats?${params.toString()}`);
@@ -548,9 +587,15 @@ export default function StatsPage() {
     const urlParams = new URLSearchParams(window.location.search);
     const hasQuery = Array.from(urlParams.keys()).length > 0;
 
+    autoSearchReadyRef.current = false;
     if (!hasQuery) {
-      loadStats(DEFAULT_STATS_FILTERS);
-      return;
+      loadStats(DEFAULT_STATS_FILTERS).finally(() => {
+        autoSearchReadyRef.current = true;
+      });
+      return () => {
+        clearAutoSearchTimeout();
+        autoSearchReadyRef.current = false;
+      };
     }
 
     const nextFilters = {
@@ -612,8 +657,45 @@ export default function StatsPage() {
       toyOrderValue: nextToyOrder
     }, { includePet: false, includePerk: false, includeToy: false });
 
-    loadStats(nextFilters, { paramsOverride: hydratedParams, skipUrlSync: true });
+    loadStats(nextFilters, { paramsOverride: hydratedParams, skipUrlSync: true }).finally(() => {
+      autoSearchReadyRef.current = true;
+    });
+
+    return () => {
+      clearAutoSearchTimeout();
+      autoSearchReadyRef.current = false;
+    };
   }, []);
+
+  const networkAutoSearchKey = useMemo(() => {
+    const networkFilters = { ...filters };
+    delete networkFilters.pet;
+    delete networkFilters.perk;
+    delete networkFilters.toy;
+    return JSON.stringify(networkFilters);
+  }, [filters]);
+  const localItemFilterKey = useMemo(
+    () => JSON.stringify({ pet: filters.pet, perk: filters.perk, toy: filters.toy }),
+    [filters.pet, filters.perk, filters.toy]
+  );
+
+  useEffect(() => {
+    if (!autoSearchReadyRef.current) return;
+    clearAutoSearchTimeout();
+    const nextKey = buildNetworkFilterKey(filters);
+    autoSearchTimeoutRef.current = setTimeout(() => {
+      autoSearchTimeoutRef.current = null;
+      if (nextKey === lastAppliedNetworkKeyRef.current) return;
+      loadStats(filters);
+    }, 1500);
+
+    return () => clearAutoSearchTimeout();
+  }, [networkAutoSearchKey]);
+
+  useEffect(() => {
+    if (!autoSearchReadyRef.current) return;
+    syncStatsUrl(filters);
+  }, [localItemFilterKey]);
 
   async function copyShareLink() {
     try {
@@ -628,6 +710,10 @@ export default function StatsPage() {
 
   function toggleCollapsed(sectionKey) {
     setCollapsed((prev) => ({ ...prev, [sectionKey]: !prev[sectionKey] }));
+  }
+
+  function toggleFilterSection(sectionKey) {
+    setVisibleFilterSections((prev) => ({ ...prev, [sectionKey]: !prev[sectionKey] }));
   }
 
   const petSprite = (name) => petOptions.find((pet) => pet.name === name)?.sprite;
@@ -963,6 +1049,7 @@ export default function StatsPage() {
               className="ghost"
               type="button"
               onClick={() => {
+                clearAutoSearchTimeout();
                 const reset = { ...DEFAULT_STATS_FILTERS };
                 setFilters(reset);
                 setPetSort(defaultSortForScope(reset.scope));
@@ -984,287 +1071,364 @@ export default function StatsPage() {
                 });
               }}
             >
-              Reset
+              Clear Filters
             </button>
-            <button className="secondary" type="button" onClick={() => loadStats(filters)}>Apply</button>
+            <button
+              className="secondary"
+              type="button"
+              onClick={() => {
+                clearAutoSearchTimeout();
+                loadStats(filters);
+              }}
+            >
+              Apply Now
+            </button>
           </div>
         </div>
         {shareStatus ? <div className="status">{shareStatus}</div> : null}
-        <div className="filters">
-          <div className="field">
-            <label>Player Name</label>
-            <input
-              placeholder="Any player"
-              value={filters.player}
-              onChange={(e) => setFilters({ ...filters, player: e.target.value })}
-            />
-          </div>
-          <div className="field">
-            <label>Player ID</label>
-            <input
-              placeholder="Player UUID"
-              value={filters.playerId}
-              onChange={(e) => setFilters({ ...filters, playerId: e.target.value })}
-            />
-          </div>
-          <div className="field">
-            <label>Version</label>
-            <select
-              value={filters.version}
-              onChange={(e) => setFilters({ ...filters, version: e.target.value })}
-            >
-              <option value="current">
-                Current
-                {meta.currentVersion ? ` (${meta.currentVersion})` : ""}
-              </option>
-              <option value="all">All Versions</option>
-              {(meta.versions || []).map((version) => (
-                <option key={version} value={version}>
-                  {version}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="field">
-            <label>Scope</label>
-            <select
-              value={filters.scope}
-              onChange={(e) => {
-                const nextScope = e.target.value;
-                const next = { ...filters, scope: nextScope };
-                const nextPetSort = defaultSortForScope(nextScope);
-                const nextPerkSort = defaultSortForScope(nextScope);
-                const nextToySort = defaultSortForScope(nextScope);
-                setFilters(next);
-                setPetSort(nextPetSort);
-                setPerkSort(nextPerkSort);
-                setToySort(nextToySort);
-                setPetOrder("desc");
-                setPerkOrder("desc");
-                setToyOrder("desc");
-                loadStats(next, {
-                  uiState: {
-                    viewModeValue: viewMode,
-                    petSortValue: nextPetSort,
-                    petOrderValue: "desc",
-                    perkSortValue: nextPerkSort,
-                    perkOrderValue: "desc",
-                    toySortValue: nextToySort,
-                    toyOrderValue: "desc"
-                  }
-                });
-              }}
-            >
-              <option value="game">Per Game</option>
-              <option value="battle">Per Battle</option>
-            </select>
-          </div>
-          <div className="field">
-            <label>Player Pack</label>
-            <select value={filters.pack} onChange={(e) => setFilters({ ...filters, pack: e.target.value })}>
-              <option value="">Any</option>
-              {packOptions.map((pack) => (
-                <option key={pack.id} value={pack.name}>{pack.name}</option>
-              ))}
-            </select>
-          </div>
-          <div className="field">
-            <label>Opponent Pack</label>
-            <select value={filters.opponentPack} onChange={(e) => setFilters({ ...filters, opponentPack: e.target.value })}>
-              <option value="">Any</option>
-              {packOptions.map((pack) => (
-                <option key={pack.id} value={pack.name}>{pack.name}</option>
-              ))}
-            </select>
-          </div>
-          <div className="field">
-            <label>Winning Pack</label>
-            <select value={filters.winningPack} onChange={(e) => setFilters({ ...filters, winningPack: e.target.value })}>
-              <option value="">Any</option>
-              {packOptions.map((pack) => (
-                <option key={`stats-win-${pack.id}`} value={pack.name}>{pack.name}</option>
-              ))}
-            </select>
-          </div>
-          <div className="field">
-            <label>Losing Pack</label>
-            <select value={filters.losingPack} onChange={(e) => setFilters({ ...filters, losingPack: e.target.value })}>
-              <option value="">Any</option>
-              {packOptions.map((pack) => (
-                <option key={`stats-lose-${pack.id}`} value={pack.name}>{pack.name}</option>
-              ))}
-            </select>
-          </div>
-          <div className="field">
-            <label>Exclude Pack</label>
-            <select value={filters.excludePack} onChange={(e) => setFilters({ ...filters, excludePack: e.target.value })}>
-              <option value="">None</option>
-              {packOptions.map((pack) => (
-                <option key={`exclude-${pack.id}`} value={pack.name}>{pack.name}</option>
-              ))}
-            </select>
-          </div>
-          <div className="field">
-            <label>Exclude Mirrors</label>
-            <select
-              value={filters.excludeMirrors ? "yes" : "no"}
-              onChange={(e) => setFilters({ ...filters, excludeMirrors: e.target.value === "yes" })}
-            >
-              <option value="no">No</option>
-              <option value="yes">Yes</option>
-            </select>
-          </div>
-          <div className="field">
-            <label>Min Sample Size</label>
-            <input
-              type="number"
-              min="0"
-              placeholder="10"
-              value={filters.minSample}
-              onChange={(e) => setFilters({ ...filters, minSample: e.target.value })}
-            />
-          </div>
-          {filters.scope === "game" && (
-            <div className="field">
-              <label>Min End On #</label>
-              <input
-                type="number"
-                min="0"
-                placeholder="Any"
-                value={filters.minEndOn}
-                onChange={(e) => setFilters({ ...filters, minEndOn: e.target.value })}
-              />
-            </div>
-          )}
-          <div className="field">
-            <label>Min Elo</label>
-            <input
-              type="number"
-              min="0"
-              placeholder="Any"
-              value={filters.minElo}
-              onChange={(e) => setFilters({ ...filters, minElo: e.target.value })}
-            />
-          </div>
-          <div className="field">
-            <label>Max Elo</label>
-            <input
-              type="number"
-              min="0"
-              placeholder="Any"
-              value={filters.maxElo}
-              onChange={(e) => setFilters({ ...filters, maxElo: e.target.value })}
-            />
-          </div>
-          <div className="field">
-            <label>Item Pack Group</label>
-            <select value={filters.itemPack} onChange={(e) => setFilters({ ...filters, itemPack: e.target.value })}>
-              <option value="">All Packs</option>
-              {packOptions.map((pack) => (
-                <option key={`item-pack-${pack.id}`} value={pack.name}>{pack.name}</option>
-              ))}
-            </select>
-          </div>
-          {filters.scope === "battle" && (
-            <>
-              <div className="field">
-                <label>
-                  <span className="multi-label-with-icon">
-                    <img src={turnFilterSprite} alt="" className="multi-label-icon" />
-                    <span>Min Turn</span>
-                  </span>
-                </label>
-                <input
-                  type="number"
-                  min="1"
-                  placeholder="1"
-                  value={filters.minTurn}
-                  onChange={(e) => setFilters({ ...filters, minTurn: e.target.value })}
-                />
-              </div>
-              <div className="field">
-                <label>
-                  <span className="multi-label-with-icon">
-                    <img src={turnFilterSprite} alt="" className="multi-label-icon" />
-                    <span>Max Turn</span>
-                  </span>
-                </label>
-                <input
-                  type="number"
-                  min="1"
-                  placeholder="15"
-                  value={filters.maxTurn}
-                  onChange={(e) => setFilters({ ...filters, maxTurn: e.target.value })}
-                />
-              </div>
-            </>
-          )}
-          <div className="field">
-            <label>Pet Level</label>
-            <select value={filters.petLevel} onChange={(e) => setFilters({ ...filters, petLevel: e.target.value })}>
-              <option value="">Any</option>
-              <option value="1">1</option>
-              <option value="2">2</option>
-              <option value="3">3</option>
-            </select>
-          </div>
+        <div className="toggles">
+          <button
+            type="button"
+            className={visibleFilterSections.general ? "toggle active" : "toggle"}
+            onClick={() => toggleFilterSection("general")}
+          >
+            General
+          </button>
+          <button
+            type="button"
+            className={visibleFilterSections.matchup ? "toggle active" : "toggle"}
+            onClick={() => toggleFilterSection("matchup")}
+          >
+            Pack Matchup
+          </button>
+          <button
+            type="button"
+            className={visibleFilterSections.thresholds ? "toggle active" : "toggle"}
+            onClick={() => toggleFilterSection("thresholds")}
+          >
+            Thresholds
+          </button>
+          <button
+            type="button"
+            className={visibleFilterSections.items ? "toggle with-icon active" : "toggle with-icon"}
+            onClick={() => toggleFilterSection("items")}
+          >
+            <img className="toggle-icon" src={petFilterSprite} alt="" />
+            Board + Turns
+          </button>
+          <button
+            type="button"
+            className={visibleFilterSections.advanced ? "toggle subtle active" : "toggle subtle"}
+            onClick={() => toggleFilterSection("advanced")}
+          >
+            Advanced
+          </button>
         </div>
-        <details className="advanced-panel">
-          <summary>Advanced</summary>
-          <p className="advanced-note">Filter by board presence for each side. Matches any battle in a game.</p>
-          <div className="filters advanced-filters">
-            <IconMultiSelect
-              label="Your Side Pet"
-              options={petOptions}
-              selected={filters.allyPet}
-              onChange={(value) => setFilters({ ...filters, allyPet: value })}
-              placeholder="Search pets and add"
-            />
-            <IconMultiSelect
-              label="Opponent Pet"
-              options={petOptions}
-              selected={filters.opponentPet}
-              onChange={(value) => setFilters({ ...filters, opponentPet: value })}
-              placeholder="Search pets and add"
-            />
-            <IconMultiSelect
-              label="Your Side Perk"
-              options={perkOptions}
-              selected={filters.allyPerk}
-              onChange={(value) => setFilters({ ...filters, allyPerk: value })}
-              placeholder="Search perks and add"
-            />
-            <IconMultiSelect
-              label="Opponent Perk"
-              options={perkOptions}
-              selected={filters.opponentPerk}
-              onChange={(value) => setFilters({ ...filters, opponentPerk: value })}
-              placeholder="Search perks and add"
-            />
-            <IconMultiSelect
-              label="Your Side Toy"
-              options={toyOptions}
-              selected={filters.allyToy}
-              onChange={(value) => setFilters({ ...filters, allyToy: value })}
-              placeholder="Search toys and add"
-            />
-            <IconMultiSelect
-              label="Opponent Toy"
-              options={toyOptions}
-              selected={filters.opponentToy}
-              onChange={(value) => setFilters({ ...filters, opponentToy: value })}
-              placeholder="Search toys and add"
-            />
-            <div className="field">
-              <label>Tags (comma)</label>
-              <input
-                placeholder="tournament, week1"
-                value={filters.tags}
-                onChange={(e) => setFilters({ ...filters, tags: e.target.value })}
-              />
+        <div className="filter-categories">
+          {visibleFilterSections.general && (
+            <div className="filter-category">
+              <div className="filter-category-head">
+                <h3>General</h3>
+                <p>Core scope and player identity filters.</p>
+              </div>
+              <div className="filters">
+                <div className="field">
+                  <label>Player Name</label>
+                  <input
+                    placeholder="Any player"
+                    value={filters.player}
+                    onChange={(e) => setFilters({ ...filters, player: e.target.value })}
+                  />
+                </div>
+                <div className="field">
+                  <label>Player ID</label>
+                  <input
+                    placeholder="Player UUID"
+                    value={filters.playerId}
+                    onChange={(e) => setFilters({ ...filters, playerId: e.target.value })}
+                  />
+                </div>
+                <div className="field">
+                  <label>Version</label>
+                  <select
+                    value={filters.version}
+                    onChange={(e) => setFilters({ ...filters, version: e.target.value })}
+                  >
+                    <option value="current">
+                      Current
+                      {meta.currentVersion ? ` (${meta.currentVersion})` : ""}
+                    </option>
+                    <option value="all">All Versions</option>
+                    {(meta.versions || []).map((version) => (
+                      <option key={version} value={version}>
+                        {version}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Scope</label>
+                  <select
+                    value={filters.scope}
+                    onChange={(e) => {
+                      const nextScope = e.target.value;
+                      const next = { ...filters, scope: nextScope };
+                      const nextPetSort = defaultSortForScope(nextScope);
+                      const nextPerkSort = defaultSortForScope(nextScope);
+                      const nextToySort = defaultSortForScope(nextScope);
+                      setFilters(next);
+                      setPetSort(nextPetSort);
+                      setPerkSort(nextPerkSort);
+                      setToySort(nextToySort);
+                      setPetOrder("desc");
+                      setPerkOrder("desc");
+                      setToyOrder("desc");
+                    }}
+                  >
+                    <option value="game">Per Game</option>
+                    <option value="battle">Per Battle</option>
+                  </select>
+                </div>
+              </div>
             </div>
-          </div>
-        </details>
+          )}
+
+          {visibleFilterSections.matchup && (
+            <div className="filter-category">
+              <div className="filter-category-head">
+                <h3>Pack Matchup</h3>
+                <p>Restrict by pack combinations and mirror handling.</p>
+              </div>
+              <div className="filters">
+                <div className="field">
+                  <label>Player Pack</label>
+                  <select value={filters.pack} onChange={(e) => setFilters({ ...filters, pack: e.target.value })}>
+                    <option value="">Any</option>
+                    {packOptions.map((pack) => (
+                      <option key={pack.id} value={pack.name}>{pack.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Opponent Pack</label>
+                  <select value={filters.opponentPack} onChange={(e) => setFilters({ ...filters, opponentPack: e.target.value })}>
+                    <option value="">Any</option>
+                    {packOptions.map((pack) => (
+                      <option key={pack.id} value={pack.name}>{pack.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Winning Pack</label>
+                  <select value={filters.winningPack} onChange={(e) => setFilters({ ...filters, winningPack: e.target.value })}>
+                    <option value="">Any</option>
+                    {packOptions.map((pack) => (
+                      <option key={`stats-win-${pack.id}`} value={pack.name}>{pack.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Losing Pack</label>
+                  <select value={filters.losingPack} onChange={(e) => setFilters({ ...filters, losingPack: e.target.value })}>
+                    <option value="">Any</option>
+                    {packOptions.map((pack) => (
+                      <option key={`stats-lose-${pack.id}`} value={pack.name}>{pack.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Exclude Pack</label>
+                  <select value={filters.excludePack} onChange={(e) => setFilters({ ...filters, excludePack: e.target.value })}>
+                    <option value="">None</option>
+                    {packOptions.map((pack) => (
+                      <option key={`exclude-${pack.id}`} value={pack.name}>{pack.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Exclude Mirrors</label>
+                  <select
+                    value={filters.excludeMirrors ? "yes" : "no"}
+                    onChange={(e) => setFilters({ ...filters, excludeMirrors: e.target.value === "yes" })}
+                  >
+                    <option value="no">No</option>
+                    <option value="yes">Yes</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {visibleFilterSections.thresholds && (
+            <div className="filter-category">
+              <div className="filter-category-head">
+                <h3>Thresholds</h3>
+                <p>Sample-size and rank constraints.</p>
+              </div>
+              <div className="filters">
+                <div className="field">
+                  <label>Min Sample Size</label>
+                  <input
+                    type="number"
+                    min="0"
+                    placeholder="10"
+                    value={filters.minSample}
+                    onChange={(e) => setFilters({ ...filters, minSample: e.target.value })}
+                  />
+                </div>
+                {filters.scope === "game" && (
+                  <div className="field">
+                    <label>Min End On #</label>
+                    <input
+                      type="number"
+                      min="0"
+                      placeholder="Any"
+                      value={filters.minEndOn}
+                      onChange={(e) => setFilters({ ...filters, minEndOn: e.target.value })}
+                    />
+                  </div>
+                )}
+                <div className="field">
+                  <label>Min Elo</label>
+                  <input
+                    type="number"
+                    min="0"
+                    placeholder="Any"
+                    value={filters.minElo}
+                    onChange={(e) => setFilters({ ...filters, minElo: e.target.value })}
+                  />
+                </div>
+                <div className="field">
+                  <label>Max Elo</label>
+                  <input
+                    type="number"
+                    min="0"
+                    placeholder="Any"
+                    value={filters.maxElo}
+                    onChange={(e) => setFilters({ ...filters, maxElo: e.target.value })}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {visibleFilterSections.items && (
+            <div className="filter-category">
+              <div className="filter-category-head">
+                <h3>Board + Turns</h3>
+                <p>Board grouping, pet level, and optional battle turn window.</p>
+              </div>
+              <div className="filters">
+                <div className="field">
+                  <label>Board Pack Group</label>
+                  <select value={filters.itemPack} onChange={(e) => setFilters({ ...filters, itemPack: e.target.value })}>
+                    <option value="">All Packs</option>
+                    {packOptions.map((pack) => (
+                      <option key={`item-pack-${pack.id}`} value={pack.name}>{pack.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Pet Level</label>
+                  <select value={filters.petLevel} onChange={(e) => setFilters({ ...filters, petLevel: e.target.value })}>
+                    <option value="">Any</option>
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                  </select>
+                </div>
+                <div className="field">
+                  <label>
+                    <span className="multi-label-with-icon">
+                      <img src={turnFilterSprite} alt="" className="multi-label-icon" />
+                      <span>Min Turn</span>
+                    </span>
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="1"
+                    value={filters.minTurn}
+                    onChange={(e) => setFilters({ ...filters, minTurn: e.target.value })}
+                  />
+                </div>
+                <div className="field">
+                  <label>
+                    <span className="multi-label-with-icon">
+                      <img src={turnFilterSprite} alt="" className="multi-label-icon" />
+                      <span>Max Turn</span>
+                    </span>
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="15"
+                    value={filters.maxTurn}
+                    onChange={(e) => setFilters({ ...filters, maxTurn: e.target.value })}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+        {visibleFilterSections.advanced && (
+          <details className="advanced-panel">
+            <summary>Advanced</summary>
+            <p className="advanced-note">Filter by board presence for each side. Matches any battle in a game.</p>
+            <div className="filters advanced-filters">
+              <IconMultiSelect
+                label="Your Side Pet"
+                options={petOptions}
+                selected={filters.allyPet}
+                onChange={(value) => setFilters({ ...filters, allyPet: value })}
+                placeholder="Search pets and add"
+              />
+              <IconMultiSelect
+                label="Opponent Pet"
+                options={petOptions}
+                selected={filters.opponentPet}
+                onChange={(value) => setFilters({ ...filters, opponentPet: value })}
+                placeholder="Search pets and add"
+              />
+              <IconMultiSelect
+                label="Your Side Perk"
+                options={perkOptions}
+                selected={filters.allyPerk}
+                onChange={(value) => setFilters({ ...filters, allyPerk: value })}
+                placeholder="Search perks and add"
+              />
+              <IconMultiSelect
+                label="Opponent Perk"
+                options={perkOptions}
+                selected={filters.opponentPerk}
+                onChange={(value) => setFilters({ ...filters, opponentPerk: value })}
+                placeholder="Search perks and add"
+              />
+              <IconMultiSelect
+                label="Your Side Toy"
+                options={toyOptions}
+                selected={filters.allyToy}
+                onChange={(value) => setFilters({ ...filters, allyToy: value })}
+                placeholder="Search toys and add"
+              />
+              <IconMultiSelect
+                label="Opponent Toy"
+                options={toyOptions}
+                selected={filters.opponentToy}
+                onChange={(value) => setFilters({ ...filters, opponentToy: value })}
+                placeholder="Search toys and add"
+              />
+              <div className="field">
+                <label>Tags (comma)</label>
+                <input
+                  placeholder="tournament, week1"
+                  value={filters.tags}
+                  onChange={(e) => setFilters({ ...filters, tags: e.target.value })}
+                />
+              </div>
+            </div>
+          </details>
+        )}
       </section>
 
 
