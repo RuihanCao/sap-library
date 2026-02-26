@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { pool } from "@/lib/db";
-import { parseReplayForCalculator } from "@/lib/calculator";
 
 export const runtime = "nodejs";
+
+const COPY_SOURCE_PET_IDS = new Set(["53", "373"]);
 
 function parseJson(input) {
   if (!input) return null;
@@ -13,6 +14,201 @@ function parseJson(input) {
   } catch {
     return null;
   }
+}
+
+function readFiniteNumber(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function toReplayId(value) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  if (typeof value === "string" && value.length > 0) {
+    return value;
+  }
+  return null;
+}
+
+function isRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function getBattleActions(replay) {
+  const actions = Array.isArray(replay?.Actions) ? replay.Actions : [];
+  return actions.filter((action) => action?.Type === 0 && action?.Battle);
+}
+
+function buildTurnStats(board) {
+  return {
+    turn: readFiniteNumber(board?.Tur),
+    victories: readFiniteNumber(board?.Vic),
+    health: readFiniteNumber(board?.Back),
+    goldSpent: readFiniteNumber(board?.GoSp),
+    rolls: readFiniteNumber(board?.Rold),
+    summons: readFiniteNumber(board?.MiSu),
+    level3Sold: readFiniteNumber(board?.MSFL),
+    transformed: readFiniteNumber(board?.TrTT)
+  };
+}
+
+function buildTurnPet(pet, fallbackSlot) {
+  if (!pet || typeof pet !== "object") {
+    return null;
+  }
+
+  const abilities = Array.isArray(pet.Abil)
+    ? pet.Abil
+      .filter((ability) => ability && typeof ability === "object")
+      .map((ability) => ({
+        id: toReplayId(ability.Enu),
+        level: readFiniteNumber(ability.Lvl),
+        group: readFiniteNumber(ability.Grop),
+        triggersConsumed: readFiniteNumber(ability.TrCo)
+      }))
+    : [];
+
+  return {
+    slot: readFiniteNumber(pet?.Poi?.x) ?? fallbackSlot,
+    id: toReplayId(pet.Enu),
+    level: readFiniteNumber(pet.Lvl),
+    experience: readFiniteNumber(pet.Exp),
+    perkId: toReplayId(pet.Perk),
+    attack: {
+      permanent: readFiniteNumber(pet?.At?.Perm),
+      temporary: readFiniteNumber(pet?.At?.Temp),
+      max: readFiniteNumber(pet?.At?.Max)
+    },
+    health: {
+      permanent: readFiniteNumber(pet?.Hp?.Perm),
+      temporary: readFiniteNumber(pet?.Hp?.Temp),
+      max: readFiniteNumber(pet?.Hp?.Max)
+    },
+    mana: readFiniteNumber(pet.Mana),
+    cosmetic: readFiniteNumber(pet.Cosm),
+    abilities
+  };
+}
+
+function buildTurnPets(board) {
+  const items = Array.isArray(board?.Mins?.Items) ? board.Mins.Items : [];
+  return items
+    .map((pet, index) => buildTurnPet(pet, index))
+    .filter((pet) => pet !== null);
+}
+
+function buildTurnRecord(action, fallbackTurn) {
+  const battle = parseJson(action?.Battle);
+  if (!battle || typeof battle !== "object") {
+    return null;
+  }
+
+  const userBoard = battle.UserBoard;
+  const opponentBoard = battle.OpponentBoard;
+  const actionTurn = Number(action?.Turn);
+  const inferredTurn =
+    readFiniteNumber(userBoard?.Tur) ?? readFiniteNumber(opponentBoard?.Tur);
+  const turn =
+    Number.isFinite(actionTurn) && actionTurn > 0
+      ? actionTurn
+      : inferredTurn ?? fallbackTurn;
+
+  return {
+    turn,
+    user: {
+      stats: buildTurnStats(userBoard),
+      pets: buildTurnPets(userBoard)
+    },
+    opponent: {
+      stats: buildTurnStats(opponentBoard),
+      pets: buildTurnPets(opponentBoard)
+    }
+  };
+}
+
+function incrementAbilityOwnerCount(abilityOwnerCounts, abilityId, petId) {
+  let petCountById = abilityOwnerCounts.get(abilityId);
+  if (!petCountById) {
+    petCountById = new Map();
+    abilityOwnerCounts.set(abilityId, petCountById);
+  }
+  petCountById.set(petId, (petCountById.get(petId) || 0) + 1);
+}
+
+function collectAbilityOwnerCounts(value, abilityOwnerCounts) {
+  if (Array.isArray(value)) {
+    value.forEach((entry) => {
+      collectAbilityOwnerCounts(entry, abilityOwnerCounts);
+    });
+    return;
+  }
+
+  if (!isRecord(value)) {
+    return;
+  }
+
+  const petId = toReplayId(value.Enu);
+  const abilities = value.Abil;
+  if (petId && Array.isArray(abilities) && !COPY_SOURCE_PET_IDS.has(petId)) {
+    abilities.forEach((ability) => {
+      if (!isRecord(ability)) {
+        return;
+      }
+      const abilityId = toReplayId(ability.Enu);
+      if (!abilityId) {
+        return;
+      }
+      incrementAbilityOwnerCount(abilityOwnerCounts, abilityId, petId);
+    });
+  }
+
+  Object.values(value).forEach((entry) => {
+    collectAbilityOwnerCounts(entry, abilityOwnerCounts);
+  });
+}
+
+function pickMostLikelyPetId(petCountById) {
+  let bestPetId = null;
+  let bestCount = -1;
+
+  for (const [petId, count] of petCountById.entries()) {
+    if (
+      count > bestCount ||
+      (count === bestCount && (bestPetId === null || petId < bestPetId))
+    ) {
+      bestPetId = petId;
+      bestCount = count;
+    }
+  }
+
+  return bestPetId;
+}
+
+function buildReplayAbilityPetMap(replay) {
+  const abilityOwnerCounts = new Map();
+  const actions = Array.isArray(replay?.Actions) ? replay.Actions : [];
+
+  actions.forEach((action) => {
+    const parsedBuild = parseJson(action?.Build);
+    const parsedBattle = parseJson(action?.Battle);
+    const parsedMode = parseJson(action?.Mode);
+    collectAbilityOwnerCounts(parsedBuild, abilityOwnerCounts);
+    collectAbilityOwnerCounts(parsedBattle, abilityOwnerCounts);
+    collectAbilityOwnerCounts(parsedMode, abilityOwnerCounts);
+  });
+
+  collectAbilityOwnerCounts(parseJson(replay?.GenesisBuildModel), abilityOwnerCounts);
+  collectAbilityOwnerCounts(parseJson(replay?.GenesisModeModel), abilityOwnerCounts);
+
+  const abilityPetMap = {};
+  for (const [abilityId, petCountById] of abilityOwnerCounts.entries()) {
+    const petId = pickMostLikelyPetId(petCountById);
+    if (petId) {
+      abilityPetMap[abilityId] = petId;
+    }
+  }
+
+  return abilityPetMap;
 }
 
 export async function GET(_req, context) {
@@ -51,43 +247,32 @@ export async function GET(_req, context) {
       return NextResponse.json({ error: "raw_json missing" }, { status: 500 });
     }
 
-    const actions = Array.isArray(raw.Actions) ? raw.Actions : [];
-
-    let buildModel = parseJson(raw.GenesisModeModel);
-    if (!buildModel) {
-      const modeAction = actions.find((a) => a.Type === 1 && a.Mode);
-      if (modeAction) {
-        buildModel = parseJson(modeAction.Mode);
-      }
-    }
-
-    const battles = actions
-      .filter((a) => a.Type === 0 && a.Battle)
-      .map((a) => parseJson(a.Battle))
-      .filter(Boolean);
-
-    const turns = battles.map((battle, index) => {
-      const state = parseReplayForCalculator(battle, buildModel);
-
-      return {
-        // Metadata
-        turnNumber: index + 1,
-        outcome: battle.Outcome,
-        opponentName: battle.Opponent?.DisplayName || null,
-        playerLives: battle.User?.Lives ?? null,
-
-        // Calculator State (Flattened)
-        ...state,
-
-        // Legacy pets structure for backward compatibility
-        pets: {
-          player: state.playerPets,
-          opponent: state.opponentPets
-        }
-      };
-    });
+    const battleActions = getBattleActions(raw);
+    const turns = battleActions
+      .map((action, index) => buildTurnRecord(action, index + 1))
+      .filter((turn) => turn !== null)
+      .sort((a, b) => a.turn - b.turn);
 
     const responseData = {
+      replayId: replayRow.id,
+      participationId: replayRow.participation_id,
+      totalTurns: turns.length,
+      turnCount: turns.length,
+      turns,
+      genesisBuildModel: parseJson(raw.GenesisBuildModel),
+      genesisModeModel: parseJson(raw.GenesisModeModel),
+      abilityPetMap: buildReplayAbilityPetMap(raw),
+      replayMeta: {
+        id: replayRow.id,
+        participation_id: replayRow.participation_id,
+        player_name: replayRow.player_name,
+        opponent_name: replayRow.opponent_name,
+        pack: replayRow.pack,
+        opponent_pack: replayRow.opponent_pack,
+        game_version: replayRow.game_version,
+        match_type: replayRow.match_type,
+        created_at: replayRow.created_at
+      },
       replay: {
         id: replayRow.id,
         participation_id: replayRow.participation_id,
@@ -97,11 +282,8 @@ export async function GET(_req, context) {
         opponent_pack: replayRow.opponent_pack,
         game_version: replayRow.game_version,
         match_type: replayRow.match_type,
-        created_at: replayRow.created_at,
-        raw_json: raw
-      },
-      turnCount: turns.length,
-      turns
+        created_at: replayRow.created_at
+      }
     };
 
     return NextResponse.json(responseData);
