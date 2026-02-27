@@ -83,7 +83,8 @@ Replay ingest now supports automatic run scheduling with this default policy:
 
 - threshold: queue a new run when at least `2000` new replay inserts are observed
 - cooldown: do not queue another run until at least `12` hours since the most recent run creation
-- safety: skip auto-start if any run is currently `queued` or `running`
+- stale-run recovery: automatically mark a `queued`/`running` run as `failed` if it exceeds the stale timeout (default `24` hours)
+- safety: skip auto-start if any non-stale run is currently `queued` or `running`
 
 This policy is tracked per supported match type (`ranked`, `private`, `arena`) in `board_rank_autorun_state` using `scope_key = matchType=<type>`.
 
@@ -92,6 +93,7 @@ Optional environment overrides:
 - `TOP_BOARDS_AUTORUN_ENABLED` (`true`/`false`)
 - `TOP_BOARDS_AUTORUN_THRESHOLD` (default `2000`)
 - `TOP_BOARDS_AUTORUN_COOLDOWN_HOURS` (default `12`)
+- `TOP_BOARDS_AUTORUN_STALE_RUN_HOURS` (default `24`)
 - `TOP_BOARDS_AUTORUN_CONFIG` (global fallback config name)
 - `TOP_BOARDS_AUTORUN_CONFIG_RANKED` (default `top-boards.default`)
 - `TOP_BOARDS_AUTORUN_CONFIG_PRIVATE` (default `top-boards.private`)
