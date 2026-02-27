@@ -258,11 +258,13 @@ export async function GET(req) {
   }
   if (playerIdExactIndex !== null) {
     includePlayerSideExprParts.push(`coalesce(r.player_id, r.raw_json->>'UserId') = $${playerIdExactIndex}`);
+    includeOpponentSideExprParts.push(`r.opponent_id = $${playerIdExactIndex}`);
   }
   if (playerIdLikeIndex !== null) {
     includeOpponentSideExprParts.push(`(
-      r.opponent_id = $${playerIdExactIndex}
-      or coalesce(r.raw_json->>'GenesisModeModel', '') ilike $${playerIdLikeIndex}
+      r.opponent_id is null
+      and coalesce(r.player_id, r.raw_json->>'UserId') is distinct from $${playerIdExactIndex}
+      and coalesce(r.raw_json->>'GenesisModeModel', '') ilike $${playerIdLikeIndex}
     )`);
   }
 
