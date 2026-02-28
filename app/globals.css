@@ -422,6 +422,18 @@ button:hover:not(:disabled) {
   font-size: 18px;
 }
 
+.card.summit-highlight,
+.list-row.summit-highlight {
+  border-color: #c3cad4;
+  box-shadow:
+    0 0 0 1px rgba(228, 232, 238, 0.95),
+    0 8px 24px rgba(165, 174, 188, 0.24);
+}
+
+.card.summit-highlight::before {
+  box-shadow: inset 0 0 0 1px rgba(245, 247, 250, 0.92);
+}
+
 .replay-image-wrap {
   position: relative;
   width: 100%;
