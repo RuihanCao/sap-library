@@ -4,6 +4,10 @@ import { pool } from "@/lib/db";
 export const runtime = "nodejs";
 
 const COPY_SOURCE_PET_IDS = new Set(["53", "373"]);
+const BATTLE_OUTCOME = {
+  WIN: 1,
+  LOSS: 2
+};
 
 function parseJson(input) {
   if (!input) return null;
@@ -39,11 +43,93 @@ function getBattleActions(replay) {
   return actions.filter((action) => action?.Type === 0 && action?.Battle);
 }
 
-function buildTurnStats(board) {
+function clampLives(value, maxLives) {
+  const lives = readFiniteNumber(value);
+  const cap = readFiniteNumber(maxLives);
+  if (lives === null) {
+    return null;
+  }
+  if (cap === null || cap <= 0) {
+    return Math.max(0, lives);
+  }
+  return Math.max(0, Math.min(cap, lives));
+}
+
+function deriveTurnFlow(battles, maxLives) {
+  const cappedMaxLives = clampLives(maxLives, maxLives) ?? 5;
+  let userLives = cappedMaxLives;
+  let opponentLives = cappedMaxLives;
+  let userVictories = 0;
+  let opponentVictories = 0;
+
+  return battles.map((battleEntry, index) => {
+    // Match replay-image logic: the turn-3 life gain appears on the next shown state.
+    if (index === 2) {
+      userLives = clampLives(userLives + 1, cappedMaxLives) ?? userLives;
+      opponentLives = clampLives(opponentLives + 1, cappedMaxLives) ?? opponentLives;
+    }
+
+    const derived = {
+      user: {
+        lives: userLives,
+        victories: userVictories
+      },
+      opponent: {
+        lives: opponentLives,
+        victories: opponentVictories
+      }
+    };
+
+    const outcome = readFiniteNumber(battleEntry?.battle?.Outcome);
+    if (outcome === BATTLE_OUTCOME.WIN) {
+      userVictories += 1;
+      opponentLives = clampLives(opponentLives - 1, cappedMaxLives) ?? opponentLives;
+    } else if (outcome === BATTLE_OUTCOME.LOSS) {
+      opponentVictories += 1;
+      userLives = clampLives(userLives - 1, cappedMaxLives) ?? userLives;
+    }
+
+    return {
+      ...battleEntry,
+      derived
+    };
+  });
+}
+
+function resolveMaxLives(replayRow, raw, battleEntries) {
+  const fromReplayRow = readFiniteNumber(replayRow?.max_lives);
+  if (fromReplayRow !== null && fromReplayRow > 0) {
+    return fromReplayRow;
+  }
+
+  const modeModel = parseJson(raw?.GenesisModeModel);
+  const fromModeModel = readFiniteNumber(modeModel?.MaxLives);
+  if (fromModeModel !== null && fromModeModel > 0) {
+    return fromModeModel;
+  }
+
+  const firstBattle = battleEntries[0]?.battle;
+  const fromBoard = readFiniteNumber(firstBattle?.UserBoard?.LiMa);
+  if (fromBoard !== null && fromBoard > 0) {
+    return fromBoard;
+  }
+
+  return 5;
+}
+
+function buildTurnStats(board, derived) {
+  const rawVictories = readFiniteNumber(board?.Vic);
+  const rawBack = readFiniteNumber(board?.Back);
+  const lives = clampLives(derived?.lives, derived?.maxLives);
+  const victories = readFiniteNumber(derived?.victories) ?? rawVictories;
+
   return {
     turn: readFiniteNumber(board?.Tur),
-    victories: readFiniteNumber(board?.Vic),
-    health: readFiniteNumber(board?.Back),
+    victories,
+    health: lives,
+    lives,
+    rawVictories,
+    rawBack,
     goldSpent: readFiniteNumber(board?.GoSp),
     rolls: readFiniteNumber(board?.Rold),
     summons: readFiniteNumber(board?.MiSu),
@@ -97,8 +183,7 @@ function buildTurnPets(board) {
     .filter((pet) => pet !== null);
 }
 
-function buildTurnRecord(action, fallbackTurn) {
-  const battle = parseJson(action?.Battle);
+function buildTurnRecord(action, battle, fallbackTurn, derivedStats) {
   if (!battle || typeof battle !== "object") {
     return null;
   }
@@ -116,11 +201,11 @@ function buildTurnRecord(action, fallbackTurn) {
   return {
     turn,
     user: {
-      stats: buildTurnStats(userBoard),
+      stats: buildTurnStats(userBoard, derivedStats?.user),
       pets: buildTurnPets(userBoard)
     },
     opponent: {
-      stats: buildTurnStats(opponentBoard),
+      stats: buildTurnStats(opponentBoard, derivedStats?.opponent),
       pets: buildTurnPets(opponentBoard)
     }
   };
@@ -230,6 +315,7 @@ export async function GET(_req, context) {
          opponent_pack,
          game_version,
          match_type,
+         max_lives,
          created_at,
          raw_json
        from replays
@@ -248,14 +334,33 @@ export async function GET(_req, context) {
     }
 
     const battleActions = getBattleActions(raw);
-    const turns = battleActions
-      .map((action, index) => buildTurnRecord(action, index + 1))
+    const battleEntries = battleActions
+      .map((action) => ({
+        action,
+        battle: parseJson(action?.Battle)
+      }))
+      .filter((entry) => entry.battle && typeof entry.battle === "object");
+
+    const maxLives = resolveMaxLives(replayRow, raw, battleEntries);
+    const battleFlow = deriveTurnFlow(battleEntries, maxLives);
+
+    const turns = battleFlow
+      .map((entry, index) => buildTurnRecord(
+        entry.action,
+        entry.battle,
+        index + 1,
+        {
+          user: { ...entry.derived.user, maxLives },
+          opponent: { ...entry.derived.opponent, maxLives }
+        }
+      ))
       .filter((turn) => turn !== null)
       .sort((a, b) => a.turn - b.turn);
 
     const responseData = {
       replayId: replayRow.id,
       participationId: replayRow.participation_id,
+      maxLives,
       totalTurns: turns.length,
       turnCount: turns.length,
       turns,
@@ -271,6 +376,7 @@ export async function GET(_req, context) {
         opponent_pack: replayRow.opponent_pack,
         game_version: replayRow.game_version,
         match_type: replayRow.match_type,
+        max_lives: maxLives,
         created_at: replayRow.created_at
       },
       replay: {
@@ -282,6 +388,7 @@ export async function GET(_req, context) {
         opponent_pack: replayRow.opponent_pack,
         game_version: replayRow.game_version,
         match_type: replayRow.match_type,
+        max_lives: maxLives,
         created_at: replayRow.created_at
       }
     };
