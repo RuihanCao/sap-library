@@ -3,6 +3,7 @@ require("dotenv").config({ path: ".env.local" });
 const {
   Client,
   GatewayIntentBits,
+  PermissionFlagsBits,
   REST,
   Routes,
   SlashCommandBuilder
@@ -10,8 +11,15 @@ const {
 const {
   ingestParticipationReplay,
   appendReplayTags,
-  normalizeTags
+  normalizeTags,
+  extractParticipationId
 } = require("./replay-ingest");
+const {
+  ensureDiscordIngestChannelsTable,
+  listDiscordIngestChannels,
+  upsertDiscordIngestChannel,
+  deleteDiscordIngestChannel
+} = require("./channel-config");
 
 const BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
 const APPLICATION_ID = process.env.DISCORD_APPLICATION_ID;
@@ -21,6 +29,10 @@ const ALLOWED_GUILD_IDS = (process.env.DISCORD_ALLOWED_GUILD_IDS || "")
   .map((value) => value.trim())
   .filter(Boolean);
 const ALLOWED_CHANNEL_IDS = (process.env.DISCORD_ALLOWED_CHANNEL_IDS || "")
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
+const AUTO_INGEST_CHANNEL_IDS = (process.env.DISCORD_AUTO_INGEST_CHANNEL_IDS || "")
   .split(",")
   .map((value) => value.trim())
   .filter(Boolean);
@@ -74,6 +86,21 @@ const commands = [
   new SlashCommandBuilder()
     .setName("sap-ping")
     .setDescription("Check if the SAP bot is alive")
+    .toJSON(),
+  new SlashCommandBuilder()
+    .setName("sap-watch-here")
+    .setDescription("Enable replay auto-ingest in this channel")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .toJSON(),
+  new SlashCommandBuilder()
+    .setName("sap-unwatch-here")
+    .setDescription("Disable replay auto-ingest in this channel")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .toJSON(),
+  new SlashCommandBuilder()
+    .setName("sap-watch-list")
+    .setDescription("List channels with replay auto-ingest enabled in this server")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .toJSON()
 ];
 
@@ -108,14 +135,73 @@ function buildBotTags(interaction, options) {
   return Array.from(new Set(tags.filter(Boolean)));
 }
 
-function interactionAllowed(interaction) {
+function buildAutoIngestTags(message) {
+  const tags = [
+    "source:discord",
+    "summit",
+    "mini",
+    "fuji",
+    message.guildId ? `discord:guild:${message.guildId}` : null,
+    message.channelId ? `discord:channel:${message.channelId}` : null,
+    message.author?.id ? `discord:user:${message.author.id}` : null,
+    message.author?.username ? `discord:username:${normalizeTagToken(message.author.username)}` : null
+  ];
+  return Array.from(new Set(tags.map((tag) => normalizeTagToken(tag)).filter(Boolean)));
+}
+
+function interactionGuildAllowed(interaction) {
   if (ALLOWED_GUILD_IDS.length && (!interaction.guildId || !ALLOWED_GUILD_IDS.includes(interaction.guildId))) {
+    return false;
+  }
+  return true;
+}
+
+function interactionAllowed(interaction) {
+  if (!interactionGuildAllowed(interaction)) {
     return false;
   }
   if (ALLOWED_CHANNEL_IDS.length && (!interaction.channelId || !ALLOWED_CHANNEL_IDS.includes(interaction.channelId))) {
     return false;
   }
   return true;
+}
+
+let watchedChannelsByGuild = new Map();
+
+function addWatchedChannel(guildId, channelId) {
+  if (!guildId || !channelId) return;
+  const existing = watchedChannelsByGuild.get(guildId) || new Set();
+  existing.add(channelId);
+  watchedChannelsByGuild.set(guildId, existing);
+}
+
+function removeWatchedChannel(guildId, channelId) {
+  const existing = watchedChannelsByGuild.get(guildId);
+  if (!existing) return;
+  existing.delete(channelId);
+  if (!existing.size) {
+    watchedChannelsByGuild.delete(guildId);
+  }
+}
+
+function replaceWatchedChannels(rows) {
+  const next = new Map();
+  for (const row of rows || []) {
+    const guildId = row.guild_id;
+    const channelId = row.channel_id;
+    if (!guildId || !channelId) continue;
+    const set = next.get(guildId) || new Set();
+    set.add(channelId);
+    next.set(guildId, set);
+  }
+  watchedChannelsByGuild = next;
+}
+
+function channelConfiguredForAutoIngest(guildId, channelId) {
+  if (!guildId || !channelId) return false;
+  if (AUTO_INGEST_CHANNEL_IDS.includes(channelId)) return true;
+  const channels = watchedChannelsByGuild.get(guildId);
+  return Boolean(channels && channels.has(channelId));
 }
 
 async function registerCommands() {
@@ -162,12 +248,7 @@ async function handleUpload(interaction) {
     });
 
     const tagResult = await appendReplayTags(ingestResult.replayId, botTags);
-    const statusLabel =
-      ingestResult.status === "inserted"
-        ? "Inserted replay"
-        : ingestResult.status === "exists_participation"
-          ? "Replay already existed (same participation ID)"
-          : "Replay already existed (same match)";
+    const statusLabel = ingestStatusLabel(ingestResult.status);
 
     await interaction.editReply(
       [
@@ -183,9 +264,119 @@ async function handleUpload(interaction) {
   }
 }
 
+function ingestStatusLabel(status) {
+  if (status === "inserted") return "Inserted replay";
+  if (status === "exists_participation") return "Replay already existed (same participation ID)";
+  return "Replay already existed (same match)";
+}
+
+async function handleWatchHere(interaction) {
+  if (!interactionGuildAllowed(interaction)) {
+    await interaction.reply({
+      content: "Auto-ingest is not enabled in this server.",
+      ephemeral: true
+    });
+    return;
+  }
+
+  if (!interaction.guildId || !interaction.channelId) {
+    await interaction.reply({
+      content: "This command can only be used in a server text channel.",
+      ephemeral: true
+    });
+    return;
+  }
+
+  await upsertDiscordIngestChannel({
+    guildId: interaction.guildId,
+    channelId: interaction.channelId,
+    updatedBy: interaction.user?.id || null
+  });
+  addWatchedChannel(interaction.guildId, interaction.channelId);
+
+  await interaction.reply({
+    content: `Auto-ingest enabled for <#${interaction.channelId}>.`,
+    ephemeral: true
+  });
+}
+
+async function handleUnwatchHere(interaction) {
+  if (!interactionGuildAllowed(interaction)) {
+    await interaction.reply({
+      content: "Auto-ingest is not enabled in this server.",
+      ephemeral: true
+    });
+    return;
+  }
+
+  if (!interaction.guildId || !interaction.channelId) {
+    await interaction.reply({
+      content: "This command can only be used in a server text channel.",
+      ephemeral: true
+    });
+    return;
+  }
+
+  await deleteDiscordIngestChannel({
+    guildId: interaction.guildId,
+    channelId: interaction.channelId
+  });
+  removeWatchedChannel(interaction.guildId, interaction.channelId);
+
+  await interaction.reply({
+    content: `Auto-ingest disabled for <#${interaction.channelId}>.`,
+    ephemeral: true
+  });
+}
+
+async function handleWatchList(interaction) {
+  if (!interactionGuildAllowed(interaction)) {
+    await interaction.reply({
+      content: "Auto-ingest is not enabled in this server.",
+      ephemeral: true
+    });
+    return;
+  }
+
+  const guildId = interaction.guildId;
+  if (!guildId) {
+    await interaction.reply({
+      content: "This command can only be used in a server.",
+      ephemeral: true
+    });
+    return;
+  }
+
+  const rows = await listDiscordIngestChannels();
+  replaceWatchedChannels(rows);
+  const configured = watchedChannelsByGuild.get(guildId) || new Set();
+  const configuredList = [...configured];
+
+  const staticList = AUTO_INGEST_CHANNEL_IDS.length
+    ? `Static env channels: ${AUTO_INGEST_CHANNEL_IDS.map((id) => `<#${id}>`).join(", ")}`
+    : "Static env channels: (none)";
+
+  if (!configuredList.length) {
+    await interaction.reply({
+      content: `DB watched channels: (none)\n${staticList}`,
+      ephemeral: true
+    });
+    return;
+  }
+
+  await interaction.reply({
+    content: `DB watched channels: ${configuredList.map((id) => `<#${id}>`).join(", ")}\n${staticList}`,
+    ephemeral: true
+  });
+}
+
 async function main() {
   const client = new Client({
-    intents: [GatewayIntentBits.Guilds]
+    intents: [
+      GatewayIntentBits.Guilds,
+      GatewayIntentBits.GuildMessages,
+      GatewayIntentBits.MessageContent
+    ]
   });
 
   client.once("clientReady", async () => {
@@ -193,12 +384,17 @@ async function main() {
       if (client.user) {
         await client.user.setPresence({ status: "online" });
       }
+      await ensureDiscordIngestChannelsTable();
+      const rows = await listDiscordIngestChannels();
+      replaceWatchedChannels(rows);
     } catch (error) {
-      console.warn("Failed to set presence", error?.message || error);
+      console.warn("Bot readiness setup failed", error?.message || error);
     }
 
     console.log(`Discord bot logged in as ${client.user?.tag || "unknown user"}`);
     console.log(`Connected guilds: ${client.guilds.cache.size}`);
+    console.log(`Auto-ingest DB channels loaded: ${[...watchedChannelsByGuild.values()].reduce((acc, set) => acc + set.size, 0)}`);
+    console.log(`Auto-ingest env channels loaded: ${AUTO_INGEST_CHANNEL_IDS.length}`);
   });
 
   client.on("shardDisconnect", (event) => {
@@ -231,6 +427,21 @@ async function main() {
         return;
       }
 
+      if (interaction.commandName === "sap-watch-here") {
+        await handleWatchHere(interaction);
+        return;
+      }
+
+      if (interaction.commandName === "sap-unwatch-here") {
+        await handleUnwatchHere(interaction);
+        return;
+      }
+
+      if (interaction.commandName === "sap-watch-list") {
+        await handleWatchList(interaction);
+        return;
+      }
+
       await interaction.reply({
         content: `Unknown command: ${interaction.commandName}`,
         ephemeral: true
@@ -248,6 +459,52 @@ async function main() {
           ephemeral: true
         }).catch(() => {});
       }
+    }
+  });
+
+  const activeMessageIngest = new Set();
+  client.on("messageCreate", async (message) => {
+    if (!message || message.author?.bot) return;
+    if (!message.guildId || !message.channelId) return;
+    if (ALLOWED_GUILD_IDS.length && !ALLOWED_GUILD_IDS.includes(message.guildId)) return;
+    if (!channelConfiguredForAutoIngest(message.guildId, message.channelId)) return;
+
+    const participationId = extractParticipationId(message.content || "");
+    if (!participationId) return;
+    if (activeMessageIngest.has(message.id)) return;
+
+    activeMessageIngest.add(message.id);
+    try {
+      const ingestResult = await ingestParticipationReplay(participationId);
+      if (ingestResult.status === "invalid_participation_id") {
+        return;
+      }
+
+      const tagResult = await appendReplayTags(ingestResult.replayId, buildAutoIngestTags(message));
+      const statusLabel = ingestStatusLabel(ingestResult.status);
+      await message.reply({
+        content: [
+          `${statusLabel}.`,
+          `Replay ID: ${ingestResult.replayId}`,
+          `Participation ID: ${ingestResult.participationId}`,
+          `Tags: ${(tagResult.tags || []).join(", ") || "(none)"}`
+        ].join("\n"),
+        allowedMentions: { repliedUser: false }
+      });
+    } catch (error) {
+      console.error("auto-ingest message handler failed", {
+        guildId: message.guildId,
+        channelId: message.channelId,
+        messageId: message.id,
+        userId: message.author?.id,
+        error: error?.message || error
+      });
+      await message.reply({
+        content: `Auto-upload failed: ${error?.message || "Unknown error"}`,
+        allowedMentions: { repliedUser: false }
+      }).catch(() => {});
+    } finally {
+      activeMessageIngest.delete(message.id);
     }
   });
 

@@ -1236,6 +1236,13 @@ export default function Page() {
     const activeCount = Number(replay.active_player_count ?? 0);
     return Number.isFinite(activeCount) && activeCount > 2;
   };
+  const hasSummitTag = (tags) => {
+    if (!Array.isArray(tags)) return false;
+    return tags.some((tag) => {
+      const normalized = String(tag || "").trim().toLowerCase();
+      return normalized === "summit" || normalized.endsWith(":summit");
+    });
+  };
 
   const rawPct = bulkProgress.total > 0 ? (bulkProgress.done / bulkProgress.total) * 100 : 0;
   const pulseBoost = bulkProgress.active ? Math.min(0.9, progressPulse) : 0;
@@ -1853,6 +1860,11 @@ export default function Page() {
             const worldOpponent = isArena(r.match_type) || isMulti(r);
             const playerWon = Number(r.last_outcome) === 1;
             const opponentWon = Number(r.last_outcome) === 2;
+            const summitGame = hasSummitTag(r.tags);
+            const summitClass = summitGame ? "summit-highlight" : "";
+            const gameTypeLabel = summitGame ? "SUMMIT" : (r.match_type || "unknown").toUpperCase();
+            const gameTypeIcon = summitGame ? "/Sprite/OutlinedTrophy.png" : getGameTypeIcon(r.match_type);
+            const rawGameType = (r.match_type || "unknown").toLowerCase();
             const playerPackClass = playerWon ? "winner-pack" : opponentWon ? "loser-pack" : "";
             const opponentPackClass = opponentWon ? "winner-pack" : playerWon ? "loser-pack" : "";
             const playerMatchupClass = `pack-name-inline matchup-pack ${playerPackClass}`.trim();
@@ -1860,7 +1872,7 @@ export default function Page() {
 
             return exploreViewMode === "list" ? (
               <div
-                className="list-row"
+                className={`list-row ${summitClass}`.trim()}
                 key={r.id}
                 role="button"
                 tabIndex={0}
@@ -1881,7 +1893,7 @@ export default function Page() {
                     <span className="vs-line">vs</span>
                     <PackInlineName name={r.opponent_pack} className={`pack-pill ${opponentPackClass}`.trim()} />
                   </div>
-                  <div className="list-matchup-sub">{(r.match_type || "unknown").toUpperCase()}</div>
+                  <div className="list-matchup-sub">{gameTypeLabel}</div>
                 </div>
 
                 <div className={`list-player list-player-right ${opponentWon ? "winner-side" : ""}`}>
@@ -1897,7 +1909,7 @@ export default function Page() {
                 </div>
               </div>
             ) : (
-              <div className="card" key={r.id} role="button" tabIndex={0} onClick={() => openModal(r.id)} onKeyDown={(e) => e.key === "Enter" && openModal(r.id)}>
+              <div className={`card ${summitClass}`.trim()} key={r.id} role="button" tabIndex={0} onClick={() => openModal(r.id)} onKeyDown={(e) => e.key === "Enter" && openModal(r.id)}>
                 <div className="card-head">
                   <h3>
                     <span className="name-line winner-line">
@@ -1919,22 +1931,22 @@ export default function Page() {
                   </h3>
                   <div className="game-type">
                     <img
-                      src={getGameTypeIcon(r.match_type)}
-                      alt={r.match_type || "Unknown"}
+                      src={gameTypeIcon}
+                      alt={gameTypeLabel}
                       style={{
                         transform:
-                          (r.match_type || "unknown").toLowerCase() === "private"
+                          !summitGame && rawGameType === "private"
                             ? "scaleX(-1)"
-                            : (r.match_type || "unknown").toLowerCase() === "ranked"
+                            : !summitGame && rawGameType === "ranked"
                               ? "scale(1.15)"
                               : "none"
                       }}
                     />
                     <span
                       className="game-type-label"
-                      style={{ fontSize: (r.match_type || "unknown").length > 6 ? "10px" : "11px" }}
+                      style={{ fontSize: gameTypeLabel.length > 6 ? "10px" : "11px" }}
                     >
-                      {(r.match_type || "unknown").toUpperCase()}
+                      {gameTypeLabel}
                     </span>
                   </div>
                 </div>
