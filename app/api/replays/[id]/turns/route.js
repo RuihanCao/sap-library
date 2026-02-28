@@ -6,7 +6,8 @@ export const runtime = "nodejs";
 const COPY_SOURCE_PET_IDS = new Set(["53", "373"]);
 const BATTLE_OUTCOME = {
   WIN: 1,
-  LOSS: 2
+  LOSS: 2,
+  TIE: 3
 };
 
 function parseJson(input) {
@@ -117,6 +118,35 @@ function resolveMaxLives(replayRow, raw, battleEntries) {
   return 5;
 }
 
+function describeOutcome(outcomeId) {
+  if (outcomeId === BATTLE_OUTCOME.WIN) {
+    return {
+      id: outcomeId,
+      user: "win",
+      opponent: "loss"
+    };
+  }
+  if (outcomeId === BATTLE_OUTCOME.LOSS) {
+    return {
+      id: outcomeId,
+      user: "loss",
+      opponent: "win"
+    };
+  }
+  if (outcomeId === BATTLE_OUTCOME.TIE) {
+    return {
+      id: outcomeId,
+      user: "tie",
+      opponent: "tie"
+    };
+  }
+  return {
+    id: outcomeId ?? null,
+    user: "unknown",
+    opponent: "unknown"
+  };
+}
+
 function buildTurnStats(board, derived) {
   const rawVictories = readFiniteNumber(board?.Vic);
   const rawBack = readFiniteNumber(board?.Back);
@@ -197,9 +227,12 @@ function buildTurnRecord(action, battle, fallbackTurn, derivedStats) {
     Number.isFinite(actionTurn) && actionTurn > 0
       ? actionTurn
       : inferredTurn ?? fallbackTurn;
+  const outcomeId = readFiniteNumber(battle?.Outcome);
+  const outcome = describeOutcome(outcomeId);
 
   return {
     turn,
+    outcome,
     user: {
       stats: buildTurnStats(userBoard, derivedStats?.user),
       pets: buildTurnPets(userBoard)
