@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { PackInlineName } from "@/app/components/pack-inline";
+import { LocalProfileMarker } from "@/app/components/local-profile-marker";
 import { fetchClientMeta } from "@/lib/clientMeta";
 
 const BUILD_BACKGROUNDS = [
@@ -345,6 +346,7 @@ export default function BoardsPage() {
           <Link href="/leaderboard" className="nav-link">Leaderboard</Link>
           <Link href="/profile" className="nav-link">Profile</Link>
           <Link href="/boards" className="nav-link active">Boards</Link>
+          <LocalProfileMarker />
         </nav>
       </section>
 

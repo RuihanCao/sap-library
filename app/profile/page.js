@@ -4,10 +4,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { PackInlineName, PackMatchupInline } from "@/app/components/pack-inline";
 import { SemanticLabel } from "@/app/components/semantic-label";
+import { LocalProfileMarker } from "@/app/components/local-profile-marker";
 import { fetchClientMeta } from "@/lib/clientMeta";
+import { clearLocalProfile, readLocalProfile, writeLocalProfile } from "@/lib/localProfile";
 
-const PROFILE_NAME_KEY = "sap-library.profileName";
-const PROFILE_ID_KEY = "sap-library.profileId";
 const GOAT_PLAYER_ID = "310a80b8-0321-4e63-8924-eb462cce9221";
 const GOAT_TARGET_TURN = 11;
 const GOAT_TARGET_PACK = "Turtle";
@@ -153,6 +153,58 @@ function pct(value) {
 
 function fixed(value, digits = 2) {
   return Number(value || 0).toFixed(digits);
+}
+
+function formatAvgElo(value) {
+  const num = Number(value || 0);
+  if (!Number.isFinite(num) || num <= 0) return "-";
+  return num.toFixed(0);
+}
+
+function normalizeOutcomeForPlayer(game, playerId) {
+  const myId = String(playerId || "").toLowerCase();
+  const playerSideId = String(game?.player_id || "").toLowerCase();
+  const opponentSideId = String(game?.opponent_id || "").toLowerCase();
+  const outcome = Number(game?.last_outcome);
+  if (!Number.isFinite(outcome)) return null;
+  if (myId && myId === playerSideId) return outcome;
+  if (myId && myId === opponentSideId) {
+    if (outcome === 1) return 2;
+    if (outcome === 2) return 1;
+    return outcome;
+  }
+  return null;
+}
+
+function computeTrendFromGames(games, playerId) {
+  const normalized = (Array.isArray(games) ? games : [])
+    .map((game) => normalizeOutcomeForPlayer(game, playerId))
+    .filter((outcome) => outcome === 1 || outcome === 2 || outcome === 3);
+  if (normalized.length < 4) {
+    return { delta: null, sample: normalized.length };
+  }
+  const recentSize = Math.floor(normalized.length / 2);
+  const previousSize = normalized.length - recentSize;
+  if (recentSize <= 0 || previousSize <= 0) {
+    return { delta: null, sample: normalized.length };
+  }
+
+  const calcWinrate = (slice) => {
+    const wins = slice.filter((v) => v === 1).length;
+    const losses = slice.filter((v) => v === 2).length;
+    const decisive = wins + losses;
+    if (decisive <= 0) return null;
+    return wins / decisive;
+  };
+
+  const recent = normalized.slice(0, recentSize);
+  const previous = normalized.slice(recentSize);
+  const recentWr = calcWinrate(recent);
+  const previousWr = calcWinrate(previous);
+  if (recentWr === null || previousWr === null) {
+    return { delta: null, sample: normalized.length };
+  }
+  return { delta: recentWr - previousWr, sample: normalized.length };
 }
 
 function getGameTypeIcon(matchType) {
@@ -447,7 +499,7 @@ export default function ProfilePage() {
       setGamesPage(1);
       inFlightGamePagesRef.current.clear();
       gamesLoadingRef.current = false;
-      return;
+      return [];
     }
 
     const pageValue = Math.max(1, Number(options.page || 1));
@@ -481,6 +533,7 @@ export default function ProfilePage() {
       });
       setGamesTotal(Number(data.total || 0));
       setGamesPage(Number(data.page || pageValue));
+      return incoming;
     } catch {
       setStatus("Failed to load player games.");
       setTimeout(() => setStatus(""), 1500);
@@ -489,6 +542,7 @@ export default function ProfilePage() {
         setGamesTotal(0);
         setGamesPage(1);
       }
+      return [];
     } finally {
       inFlightGamePagesRef.current.delete(pageValue);
       gamesLoadingRef.current = false;
@@ -506,17 +560,32 @@ export default function ProfilePage() {
     }
     setLoading(true);
     lastAppliedFilterKeyRef.current = buildParams(nextFilters, playerIdValue).toString();
-    await loadPlayerGames(playerIdValue, nextFilters, { page: 1 });
+    const firstPageGames = await loadPlayerGames(playerIdValue, nextFilters, { page: 1 });
     try {
       const params = buildParams(nextFilters, playerIdValue);
       params.delete("playerId");
       const res = await fetch(`/api/leaderboard/${encodeURIComponent(playerIdValue)}?${params.toString()}`);
       const data = await res.json();
       setDetail(data);
-      if (data?.playerName) {
-        setQuery(data.playerName);
-        localStorage.setItem(PROFILE_NAME_KEY, data.playerName);
-      }
+      const nextName = data?.playerName || playerIdValue;
+      if (data?.playerName) setQuery(data.playerName);
+      const topPack = Array.isArray(data?.packStats) && data.packStats.length > 0 ? data.packStats[0] : null;
+      const scopeKey = nextFilters?.scope === "battle" ? "rounds" : "games";
+      const scopeTotal = Number(data?.summary?.[scopeKey] || 0);
+      const topPackAmount = Number(topPack?.[scopeKey] || 0);
+      const topPackShare = scopeTotal > 0 ? topPackAmount / scopeTotal : null;
+      const trend = computeTrendFromGames(firstPageGames, playerIdValue);
+      writeLocalProfile({
+        playerId: playerIdValue,
+        name: nextName,
+        winrate: data?.summary?.winrate,
+        mainPack: topPack?.pack || null,
+        mainPackShare: topPackShare,
+        rankedSample: data?.summary?.eloSampleSize,
+        lastSeenAt: firstPageGames?.[0]?.created_at || null,
+        trendDelta: trend.delta,
+        trendGames: trend.sample
+      });
       if (!options.skipUrlSync) {
         const nextParams = buildParams(nextFilters, playerIdValue);
         nextParams.set("uiView", gamesViewMode);
@@ -824,8 +893,17 @@ export default function ProfilePage() {
     setQuery(nextName);
     setSuggestionsOpen(false);
     setSuggestions([]);
-    localStorage.setItem(PROFILE_ID_KEY, player.playerId);
-    localStorage.setItem(PROFILE_NAME_KEY, nextName);
+    writeLocalProfile({
+      playerId: player.playerId,
+      name: nextName,
+      winrate: null,
+      mainPack: null,
+      mainPackShare: null,
+      rankedSample: null,
+      lastSeenAt: null,
+      trendDelta: null,
+      trendGames: null
+    });
     if (options.statusText) {
       setStatus(options.statusText);
       setTimeout(() => setStatus(""), 1500);
@@ -889,8 +967,7 @@ export default function ProfilePage() {
     setModalData(null);
     inFlightGamePagesRef.current.clear();
     gamesLoadingRef.current = false;
-    localStorage.removeItem(PROFILE_ID_KEY);
-    localStorage.removeItem(PROFILE_NAME_KEY);
+    clearLocalProfile();
     window.history.replaceState({}, "", window.location.pathname);
   }
 
@@ -934,8 +1011,9 @@ export default function ProfilePage() {
     setFilters(nextFilters);
     setGamesViewMode(uiViewFromUrl === "list" ? "list" : "card");
 
-    const storedId = localStorage.getItem(PROFILE_ID_KEY) || "";
-    const storedName = localStorage.getItem(PROFILE_NAME_KEY) || "";
+    const localProfile = readLocalProfile();
+    const storedId = localProfile.playerId || "";
+    const storedName = localProfile.name || "";
     const initialPlayerId = playerIdFromUrl || storedId;
     const initialName = storedName || initialPlayerId;
     if (initialName) setQuery(initialName);
@@ -1009,6 +1087,7 @@ export default function ProfilePage() {
           <Link href="/leaderboard" className="nav-link">Leaderboard</Link>
           <Link href="/profile" className="nav-link active">Profile</Link>
           <Link href="/boards" className="nav-link">Boards</Link>
+          <LocalProfileMarker />
         </nav>
       </section>
 
@@ -1142,6 +1221,10 @@ export default function ProfilePage() {
                   <SemanticLabel type="turn">Avg Gold/Turn</SemanticLabel>
                 </span>
                 <strong className="gold-text">{fixed(detail.summary?.avgGoldPerTurn)}</strong>
+              </div>
+              <div className="stats-summary-item">
+                <span className="label">Avg Elo</span>
+                <strong>{formatAvgElo(detail.summary?.avgElo)}</strong>
               </div>
               <div className="stats-summary-item">
                 <span className="label">Total Elo Gain</span>

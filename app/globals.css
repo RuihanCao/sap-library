@@ -447,6 +447,14 @@ button:hover:not(:disabled) {
   pointer-events: none;
 }
 
+.card.profile-featured:not(.summit-highlight),
+.list-row.profile-featured:not(.summit-highlight) {
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 1px rgba(58, 167, 201, 0.35),
+    0 12px 26px rgba(22, 91, 110, 0.2);
+}
+
 .replay-image-wrap {
   position: relative;
   width: 100%;
@@ -1479,6 +1487,112 @@ button:hover:not(:disabled) {
   color: var(--accent);
 }
 
+.profile-marker {
+  text-decoration: none;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  padding: 6px 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 220px;
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.08);
+}
+
+.profile-marker-wrap {
+  position: relative;
+}
+
+.profile-marker-pack {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+  flex: 0 0 auto;
+}
+
+.profile-marker-pack-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 50%;
+  background: var(--panel-2);
+}
+
+.profile-marker-copy {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.profile-marker-copy strong {
+  font-size: 12px;
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.profile-marker-copy small {
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.profile-marker-hover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 260px;
+  max-width: 320px;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid var(--edge);
+  border-radius: 12px;
+  padding: 10px;
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.16);
+  z-index: 20;
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.profile-marker-wrap:hover .profile-marker-hover,
+.profile-marker-wrap:focus-within .profile-marker-hover {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.profile-marker-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.profile-marker-grid div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.profile-marker-grid span {
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.profile-marker-grid strong {
+  font-size: 12px;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
 .extension-banner {
   margin: 0;
   flex: 1 1 420px;
@@ -1727,7 +1841,7 @@ button:hover:not(:disabled) {
 
 .leaderboard-row {
   display: grid;
-  grid-template-columns: minmax(220px, 1.3fr) repeat(9, minmax(80px, 0.75fr));
+  grid-template-columns: minmax(220px, 1.3fr) repeat(10, minmax(80px, 0.75fr));
   align-items: center;
   gap: 10px;
   border: 1px solid var(--edge);
@@ -1741,7 +1855,7 @@ button:hover:not(:disabled) {
 }
 
 .leaderboard-table.scope-game .leaderboard-row {
-  grid-template-columns: minmax(220px, 1.3fr) repeat(8, minmax(80px, 0.75fr));
+  grid-template-columns: minmax(220px, 1.3fr) repeat(9, minmax(80px, 0.75fr));
 }
 
 .leaderboard-table.scope-game .col-draw {
@@ -2323,6 +2437,16 @@ button:hover:not(:disabled) {
     width: 100%;
     justify-content: flex-start;
     margin-left: 0;
+  }
+
+  .profile-marker {
+    max-width: 100%;
+  }
+
+  .profile-marker-hover {
+    left: 0;
+    right: auto;
+    min-width: min(280px, calc(100vw - 32px));
   }
 
   .extension-banner {

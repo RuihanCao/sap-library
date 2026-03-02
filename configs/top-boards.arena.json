@@ -16,6 +16,7 @@
     "minTurn": 1,
     "maxTurn": null,
     "maxBoards": 1000,
+    "replayScanMultiplier": 8,
     "sampleSeed": 1337,
     "dedupeByBoardHash": true
   },
@@ -34,7 +35,6 @@
     },
     "final": {
       "strategy": "round-robin",
-      "topN": 30,
       "simulationCount": 4
     }
   },

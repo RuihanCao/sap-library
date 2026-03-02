@@ -661,6 +661,8 @@ export async function GET(req) {
   const dataSql = `
     select r.id, r.participation_id, r.player_name, r.opponent_name, r.pack, r.opponent_pack, r.game_version, r.match_type, r.mode,
            r.max_player_count, r.active_player_count, r.created_at, r.tags, lt.outcome as last_outcome,
+           ${playerIdExpr} as player_id,
+           ${opponentIdExpr} as opponent_id,
            case
              when lower(coalesce(r.match_type, '')) = 'private' then ${privatePlayerDisplayRankExpr}
              else coalesce(

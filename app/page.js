@@ -2,8 +2,10 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { LocalProfileMarker } from "@/app/components/local-profile-marker";
 import { PackInlineName, PackMatchupInline } from "@/app/components/pack-inline";
 import { fetchClientMeta } from "@/lib/clientMeta";
+import { LOCAL_PROFILE_EVENT, readLocalProfile } from "@/lib/localProfile";
 
 const BUILD_BACKGROUNDS = [
   "AboveCloudsBuild.png",
@@ -377,6 +379,7 @@ export default function Page() {
   const [modalCalcLoading, setModalCalcLoading] = useState(false);
   const [modalCalcHover, setModalCalcHover] = useState(null);
   const [showExtensionBanner, setShowExtensionBanner] = useState(true);
+  const [localProfileId, setLocalProfileId] = useState("");
   const listSentinelRef = useRef(null);
   const modalCalcStatusTimeoutRef = useRef(null);
   const replayImageVersion = "2026-02-12-text-fix";
@@ -394,6 +397,20 @@ export default function Page() {
 
   useEffect(() => {
     fetchClientMeta().then(setMeta);
+  }, []);
+
+  useEffect(() => {
+    const syncLocalProfile = () => {
+      const profile = readLocalProfile();
+      setLocalProfileId((profile.playerId || "").toLowerCase());
+    };
+    syncLocalProfile();
+    window.addEventListener("storage", syncLocalProfile);
+    window.addEventListener(LOCAL_PROFILE_EVENT, syncLocalProfile);
+    return () => {
+      window.removeEventListener("storage", syncLocalProfile);
+      window.removeEventListener(LOCAL_PROFILE_EVENT, syncLocalProfile);
+    };
   }, []);
 
   useEffect(() => {
@@ -1256,6 +1273,7 @@ export default function Page() {
         <Link href="/leaderboard" className="nav-link">Leaderboard</Link>
         <Link href="/profile" className="nav-link">Profile</Link>
         <Link href="/boards" className="nav-link">Boards</Link>
+        <LocalProfileMarker />
       </div>
       <header className="hero">
         <div className="hero-copy">
@@ -1862,6 +1880,12 @@ export default function Page() {
             const opponentWon = Number(r.last_outcome) === 2;
             const summitGame = hasSummitTag(r.tags);
             const summitClass = summitGame ? "summit-highlight" : "";
+            const replayPlayerId = String(r.player_id || "").toLowerCase();
+            const replayOpponentId = String(r.opponent_id || "").toLowerCase();
+            const profileFeatured = Boolean(localProfileId) && (
+              localProfileId === replayPlayerId || localProfileId === replayOpponentId
+            );
+            const profileFeaturedClass = profileFeatured ? "profile-featured" : "";
             const gameTypeLabel = summitGame ? "SUMMIT" : (r.match_type || "unknown").toUpperCase();
             const gameTypeIcon = summitGame ? "/Sprite/OutlinedTrophy.png" : getGameTypeIcon(r.match_type);
             const rawGameType = (r.match_type || "unknown").toLowerCase();
@@ -1872,7 +1896,7 @@ export default function Page() {
 
             return exploreViewMode === "list" ? (
               <div
-                className={`list-row ${summitClass}`.trim()}
+                className={`list-row ${summitClass} ${profileFeaturedClass}`.trim()}
                 key={r.id}
                 role="button"
                 tabIndex={0}
@@ -1909,7 +1933,7 @@ export default function Page() {
                 </div>
               </div>
             ) : (
-              <div className={`card ${summitClass}`.trim()} key={r.id} role="button" tabIndex={0} onClick={() => openModal(r.id)} onKeyDown={(e) => e.key === "Enter" && openModal(r.id)}>
+              <div className={`card ${summitClass} ${profileFeaturedClass}`.trim()} key={r.id} role="button" tabIndex={0} onClick={() => openModal(r.id)} onKeyDown={(e) => e.key === "Enter" && openModal(r.id)}>
                 <div className="card-head">
                   <h3>
                     <span className="name-line winner-line">

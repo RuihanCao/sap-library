@@ -266,9 +266,11 @@ function buildGameSql() {
       select
         coalesce(sum(rd.elo_delta), 0)::int as total_elo_gain,
         case when count(rd.elo_delta) > 0 then avg(rd.elo_delta)::float8 else 0::float8 end as avg_elo_gain,
-        count(rd.elo_delta)::int as elo_sample_size
-      from rank_deltas rd
-      where rd.elo_delta is not null
+        count(rd.elo_delta)::int as elo_sample_size,
+        case when count(rr.rank) > 0 then avg(rr.rank::float8)::float8 else 0::float8 end as avg_elo
+      from ranked_replays rr
+      left join rank_deltas rd on rd.replay_id = rr.replay_id
+      where rr.rank is not null
     )
     select
       coalesce((
@@ -286,7 +288,8 @@ function buildGameSql() {
           'avgSummonsPerTurn', coalesce(ta.avg_summons_per_turn, 0::float8),
           'totalEloGain', coalesce(es.total_elo_gain, 0),
           'avgEloGain', coalesce(es.avg_elo_gain, 0::float8),
-          'eloSampleSize', coalesce(es.elo_sample_size, 0)
+          'eloSampleSize', coalesce(es.elo_sample_size, 0),
+          'avgElo', coalesce(es.avg_elo, 0::float8)
         )
         from summary s
         cross join turn_agg ta
@@ -410,9 +413,11 @@ function buildBattleSql() {
       select
         coalesce(sum(rd.elo_delta), 0)::int as total_elo_gain,
         case when count(rd.elo_delta) > 0 then avg(rd.elo_delta)::float8 else 0::float8 end as avg_elo_gain,
-        count(rd.elo_delta)::int as elo_sample_size
-      from rank_deltas rd
-      where rd.elo_delta is not null
+        count(rd.elo_delta)::int as elo_sample_size,
+        case when count(rr.rank) > 0 then avg(rr.rank::float8)::float8 else 0::float8 end as avg_elo
+      from ranked_replays rr
+      left join rank_deltas rd on rd.replay_id = rr.replay_id
+      where rr.rank is not null
     )
     select
       coalesce((
@@ -430,7 +435,8 @@ function buildBattleSql() {
           'avgSummonsPerTurn', coalesce(s.avg_summons_per_turn, 0::float8),
           'totalEloGain', coalesce(es.total_elo_gain, 0),
           'avgEloGain', coalesce(es.avg_elo_gain, 0::float8),
-          'eloSampleSize', coalesce(es.elo_sample_size, 0)
+          'eloSampleSize', coalesce(es.elo_sample_size, 0),
+          'avgElo', coalesce(es.avg_elo, 0::float8)
         )
         from summary s
         cross join elo_summary es

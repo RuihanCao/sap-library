@@ -6,6 +6,7 @@ import { getPackSprite } from "@/lib/packSprites";
 import { fetchClientMeta } from "@/lib/clientMeta";
 import { SemanticLabel } from "@/app/components/semantic-label";
 import { PackMatchupInline } from "@/app/components/pack-inline";
+import { LocalProfileMarker } from "@/app/components/local-profile-marker";
 
 const BUILD_BACKGROUNDS = [
   "AboveCloudsBuild.png",
@@ -1037,6 +1038,7 @@ export default function StatsPage() {
           <Link href="/leaderboard" className="nav-link">Leaderboard</Link>
           <Link href="/profile" className="nav-link">Profile</Link>
           <Link href="/boards" className="nav-link">Boards</Link>
+          <LocalProfileMarker />
         </nav>
       </header>
 

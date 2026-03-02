@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { PackInlineName, PackMatchupInline } from "@/app/components/pack-inline";
 import { SemanticLabel } from "@/app/components/semantic-label";
+import { LocalProfileMarker } from "@/app/components/local-profile-marker";
 import { getPackSprite } from "@/lib/packSprites";
 import { fetchClientMeta } from "@/lib/clientMeta";
 
@@ -160,6 +161,12 @@ function pct(value) {
 
 function fixed(value, digits = 2) {
   return Number(value || 0).toFixed(digits);
+}
+
+function formatAvgElo(value) {
+  const num = Number(value || 0);
+  if (!Number.isFinite(num) || num <= 0) return "-";
+  return num.toFixed(0);
 }
 
 function avgGameLength(rounds, games) {
@@ -550,6 +557,7 @@ export default function LeaderboardPage() {
           <Link href="/leaderboard" className="nav-link active">Leaderboard</Link>
           <Link href="/profile" className="nav-link">Profile</Link>
           <Link href="/boards" className="nav-link">Boards</Link>
+          <LocalProfileMarker />
         </nav>
       </section>
 
@@ -826,6 +834,9 @@ export default function LeaderboardPage() {
             <button type="button" className={`leaderboard-sort-btn gold-text ${filters.sort === "avg_gold" ? "active" : ""}`} onClick={() => toggleSort("avg_gold")}>
               Avg Gold <span>{sortIndicator("avg_gold")}</span>
             </button>
+            <button type="button" className={`leaderboard-sort-btn ${filters.sort === "avg_elo" ? "active" : ""}`} onClick={() => toggleSort("avg_elo")}>
+              Avg Elo <span>{sortIndicator("avg_elo")}</span>
+            </button>
             <button type="button" className={`leaderboard-sort-btn ${filters.sort === "avg_game_length" ? "active" : ""}`} onClick={() => toggleSort("avg_game_length")}>
               Avg Game Length <span>{sortIndicator("avg_game_length")}</span>
             </button>
@@ -862,6 +873,7 @@ export default function LeaderboardPage() {
                 <span className="metric-cell rate-win" data-label="Winrate">{pct(player.winrate)}</span>
                 <span className="metric-cell" data-label="Avg Rolls">{fixed(player.avgRollsPerTurn)}</span>
                 <span className="metric-cell gold-text" data-label="Avg Gold">{fixed(player.avgGoldPerTurn)}</span>
+                <span className="metric-cell" data-label="Avg Elo">{formatAvgElo(player.avgElo)}</span>
                 <span className="metric-cell" data-label="Avg Game Length">{fixed(player.avgGameLength, 2)}</span>
               </button>
             );

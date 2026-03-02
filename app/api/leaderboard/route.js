@@ -164,6 +164,7 @@ function buildOrder(scope, sortKey, order) {
           drawrate: "j.drawrate",
           avg_rolls: "j.avg_rolls_per_turn",
           avg_gold: "j.avg_gold_per_turn",
+          avg_elo: "j.avg_elo",
           avg_summons: "j.avg_summons_per_turn",
           avg_game_length: "j.avg_game_length"
         }
@@ -179,6 +180,7 @@ function buildOrder(scope, sortKey, order) {
           drawrate: "j.drawrate",
           avg_rolls: "j.avg_rolls_per_turn",
           avg_gold: "j.avg_gold_per_turn",
+          avg_elo: "j.avg_elo",
           avg_summons: "j.avg_summons_per_turn",
           avg_game_length: "j.avg_game_length"
         };
@@ -229,6 +231,40 @@ function buildGameSql(orderBy) {
       from turn_rows tr
       group by tr.spotlight_id
     ),
+    player_ranked_replays as (
+      select distinct
+        tr.spotlight_id as player_id,
+        tr.replay_id,
+        case
+          when tr.side = 'player' then coalesce(
+            r.player_rank,
+            case
+              when ((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank') ~ '^[0-9]+$')
+                then (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank')::int
+              else null
+            end
+          )
+          else coalesce(
+            r.opponent_rank,
+            case
+              when ((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank') ~ '^[0-9]+$')
+                then (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank')::int
+              else null
+            end
+          )
+        end as rank
+      from turn_rows tr
+      join replays r on r.id = tr.replay_id
+      where lower(coalesce(r.match_type, '')) = 'ranked'
+    ),
+    player_avg_elo as (
+      select
+        prr.player_id,
+        avg(prr.rank::float8)::float8 as avg_elo
+      from player_ranked_replays prr
+      where prr.rank is not null
+      group by prr.player_id
+    ),
     player_pack_counts as (
       select
         go.spotlight_id as player_id,
@@ -269,6 +305,7 @@ function buildGameSql(orderBy) {
         end as drawrate,
         coalesce(pta.avg_rolls_per_turn, 0::float8) as avg_rolls_per_turn,
         coalesce(pta.avg_gold_per_turn, 0::float8) as avg_gold_per_turn,
+        coalesce(pae.avg_elo, 0::float8) as avg_elo,
         coalesce(pta.avg_summons_per_turn, 0::float8) as avg_summons_per_turn,
         case
           when pr.games > 0 then coalesce(ptc.rounds, 0)::float8 / pr.games::float8
@@ -278,6 +315,7 @@ function buildGameSql(orderBy) {
       from player_rollup pr
       left join player_turn_counts ptc on ptc.player_id = pr.player_id
       left join player_turn_avgs pta on pta.player_id = pr.player_id
+      left join player_avg_elo pae on pae.player_id = pr.player_id
       left join player_top_pack ptp on ptp.player_id = pr.player_id
     )
     select
@@ -293,6 +331,7 @@ function buildGameSql(orderBy) {
       j.drawrate,
       j.avg_rolls_per_turn,
       j.avg_gold_per_turn,
+      j.avg_elo,
       j.avg_summons_per_turn,
       j.avg_game_length,
       j.most_played_pack,
@@ -323,6 +362,40 @@ function buildBattleSql(orderBy) {
         avg(coalesce(tr.summons, 0)::float8)::float8 as avg_summons_per_turn
       from turn_rows tr
       group by tr.spotlight_id
+    ),
+    player_ranked_replays as (
+      select distinct
+        tr.spotlight_id as player_id,
+        tr.replay_id,
+        case
+          when tr.side = 'player' then coalesce(
+            r.player_rank,
+            case
+              when ((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank') ~ '^[0-9]+$')
+                then (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank')::int
+              else null
+            end
+          )
+          else coalesce(
+            r.opponent_rank,
+            case
+              when ((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank') ~ '^[0-9]+$')
+                then (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank')::int
+              else null
+            end
+          )
+        end as rank
+      from turn_rows tr
+      join replays r on r.id = tr.replay_id
+      where lower(coalesce(r.match_type, '')) = 'ranked'
+    ),
+    player_avg_elo as (
+      select
+        prr.player_id,
+        avg(prr.rank::float8)::float8 as avg_elo
+      from player_ranked_replays prr
+      where prr.rank is not null
+      group by prr.player_id
     ),
     player_pack_counts as (
       select
@@ -364,6 +437,7 @@ function buildBattleSql(orderBy) {
         end as drawrate,
         coalesce(pr.avg_rolls_per_turn, 0::float8) as avg_rolls_per_turn,
         coalesce(pr.avg_gold_per_turn, 0::float8) as avg_gold_per_turn,
+        coalesce(pae.avg_elo, 0::float8) as avg_elo,
         coalesce(pr.avg_summons_per_turn, 0::float8) as avg_summons_per_turn,
         case
           when pr.games > 0 then pr.rounds::float8 / pr.games::float8
@@ -371,6 +445,7 @@ function buildBattleSql(orderBy) {
         end as avg_game_length,
         ptp.most_played_pack
       from player_rollup pr
+      left join player_avg_elo pae on pae.player_id = pr.player_id
       left join player_top_pack ptp on ptp.player_id = pr.player_id
     )
     select
@@ -386,6 +461,7 @@ function buildBattleSql(orderBy) {
       j.drawrate,
       j.avg_rolls_per_turn,
       j.avg_gold_per_turn,
+      j.avg_elo,
       j.avg_summons_per_turn,
       j.avg_game_length,
       j.most_played_pack,
@@ -467,6 +543,7 @@ export async function GET(req) {
         drawrate: Number(row.drawrate || 0),
         avgRollsPerTurn: Number(row.avg_rolls_per_turn || 0),
         avgGoldPerTurn: Number(row.avg_gold_per_turn || 0),
+        avgElo: Number(row.avg_elo || 0),
         avgSummonsPerTurn: Number(row.avg_summons_per_turn || 0),
         avgGameLength: Number(row.avg_game_length || 0),
         mostPlayedPack: row.most_played_pack || null
