@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { pool } from "@/lib/db";
 import { ensureHiddenPlayersTable, hiddenReplayClause } from "@/lib/hiddenPlayers";
 import { resolveVersionFilter } from "@/lib/versionFilter";
+import { getCachedPayload, setCachedPayload } from "@/lib/responseCache";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,6 +11,9 @@ const EXCLUDED_PACKS = ["Custom", "Weekly"];
 const DEFAULT_PAGE_SIZE = 25;
 const MAX_PAGE_SIZE = 100;
 const MIN_MATCH_THRESHOLD = 1;
+const LEADERBOARD_CACHE_TTL_MS = 20_000;
+const LEADERBOARD_CACHE_MAX_KEYS = 250;
+const LEADERBOARD_CACHE_NAMESPACE = "leaderboard";
 
 function parseList(value) {
   if (!value) return [];
@@ -475,6 +479,21 @@ function buildBattleSql(orderBy) {
 }
 
 export async function GET(req) {
+  const cacheKey = req.url;
+  const cachedPayload = getCachedPayload(
+    LEADERBOARD_CACHE_NAMESPACE,
+    cacheKey,
+    LEADERBOARD_CACHE_TTL_MS
+  );
+  if (cachedPayload) {
+    return NextResponse.json(cachedPayload, {
+      headers: {
+        "Cache-Control": "public, max-age=30, s-maxage=60, stale-while-revalidate=120",
+        "X-Leaderboard-Cache": "HIT"
+      }
+    });
+  }
+
   await ensureHiddenPlayersTable(pool);
   const { searchParams } = new URL(req.url);
   const scope = (searchParams.get("scope") || "game").toLowerCase() === "battle" ? "battle" : "game";
@@ -524,35 +543,37 @@ export async function GET(req) {
   const { rows } = await pool.query(sql, values);
   const total = Number(rows[0]?.total_players || 0);
 
-  return NextResponse.json(
-    {
-      scope,
-      page,
-      pageSize,
-      total,
-      players: rows.map((row) => ({
-        playerId: row.player_id,
-        playerName: row.player_name,
-        games: Number(row.games || 0),
-        rounds: Number(row.rounds || 0),
-        wins: Number(row.wins || 0),
-        losses: Number(row.losses || 0),
-        draws: Number(row.draws || 0),
-        winrate: Number(row.winrate || 0),
-        lossrate: Number(row.lossrate || 0),
-        drawrate: Number(row.drawrate || 0),
-        avgRollsPerTurn: Number(row.avg_rolls_per_turn || 0),
-        avgGoldPerTurn: Number(row.avg_gold_per_turn || 0),
-        avgElo: Number(row.avg_elo || 0),
-        avgSummonsPerTurn: Number(row.avg_summons_per_turn || 0),
-        avgGameLength: Number(row.avg_game_length || 0),
-        mostPlayedPack: row.most_played_pack || null
-      }))
-    },
-    {
-      headers: {
-        "Cache-Control": "public, max-age=30, s-maxage=60, stale-while-revalidate=120"
-      }
+  const payload = {
+    scope,
+    page,
+    pageSize,
+    total,
+    players: rows.map((row) => ({
+      playerId: row.player_id,
+      playerName: row.player_name,
+      games: Number(row.games || 0),
+      rounds: Number(row.rounds || 0),
+      wins: Number(row.wins || 0),
+      losses: Number(row.losses || 0),
+      draws: Number(row.draws || 0),
+      winrate: Number(row.winrate || 0),
+      lossrate: Number(row.lossrate || 0),
+      drawrate: Number(row.drawrate || 0),
+      avgRollsPerTurn: Number(row.avg_rolls_per_turn || 0),
+      avgGoldPerTurn: Number(row.avg_gold_per_turn || 0),
+      avgElo: Number(row.avg_elo || 0),
+      avgSummonsPerTurn: Number(row.avg_summons_per_turn || 0),
+      avgGameLength: Number(row.avg_game_length || 0),
+      mostPlayedPack: row.most_played_pack || null
+    }))
+  };
+
+  setCachedPayload(LEADERBOARD_CACHE_NAMESPACE, cacheKey, payload, LEADERBOARD_CACHE_MAX_KEYS);
+
+  return NextResponse.json(payload, {
+    headers: {
+      "Cache-Control": "public, max-age=30, s-maxage=60, stale-while-revalidate=120",
+      "X-Leaderboard-Cache": "MISS"
     }
-  );
+  });
 }

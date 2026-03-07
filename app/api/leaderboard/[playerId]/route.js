@@ -2,11 +2,15 @@ import { NextResponse } from "next/server";
 import { pool } from "@/lib/db";
 import { ensureHiddenPlayersTable, hiddenReplayClause } from "@/lib/hiddenPlayers";
 import { resolveVersionFilter } from "@/lib/versionFilter";
+import { getCachedPayload, setCachedPayload } from "@/lib/responseCache";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const EXCLUDED_PACKS = ["Custom", "Weekly"];
+const PLAYER_SUMMARY_CACHE_TTL_MS = 20_000;
+const PLAYER_SUMMARY_CACHE_MAX_KEYS = 300;
+const PLAYER_SUMMARY_CACHE_NAMESPACE = "leaderboard-player";
 
 function parseList(value) {
   if (!value) return [];
@@ -475,6 +479,21 @@ export async function GET(req, context) {
     return NextResponse.json({ error: "player hidden" }, { status: 404 });
   }
 
+  const cacheKey = req.url;
+  const cachedPayload = getCachedPayload(
+    PLAYER_SUMMARY_CACHE_NAMESPACE,
+    cacheKey,
+    PLAYER_SUMMARY_CACHE_TTL_MS
+  );
+  if (cachedPayload) {
+    return NextResponse.json(cachedPayload, {
+      headers: {
+        "Cache-Control": "public, max-age=30, s-maxage=60, stale-while-revalidate=120",
+        "X-Player-Cache": "HIT"
+      }
+    });
+  }
+
   const { searchParams } = new URL(req.url);
   const scope = (searchParams.get("scope") || "game").toLowerCase() === "battle" ? "battle" : "game";
 
@@ -563,20 +582,27 @@ export async function GET(req, context) {
   );
   const latestName = latestNameResult.rows[0]?.player_name || null;
 
-  return NextResponse.json(
-    {
-      scope,
-      playerId,
-      playerName: latestName || row.player_name || null,
-      summary: row.summary || {},
-      packStats: row.pack_stats || [],
-      matchupStats: row.matchup_stats || [],
-      perTurn: row.per_turn || []
-    },
-    {
-      headers: {
-        "Cache-Control": "public, max-age=30, s-maxage=60, stale-while-revalidate=120"
-      }
-    }
+  const payload = {
+    scope,
+    playerId,
+    playerName: latestName || row.player_name || null,
+    summary: row.summary || {},
+    packStats: row.pack_stats || [],
+    matchupStats: row.matchup_stats || [],
+    perTurn: row.per_turn || []
+  };
+
+  setCachedPayload(
+    PLAYER_SUMMARY_CACHE_NAMESPACE,
+    cacheKey,
+    payload,
+    PLAYER_SUMMARY_CACHE_MAX_KEYS
   );
+
+  return NextResponse.json(payload, {
+    headers: {
+      "Cache-Control": "public, max-age=30, s-maxage=60, stale-while-revalidate=120",
+      "X-Player-Cache": "MISS"
+    }
+  });
 }

@@ -1,4 +1,5 @@
 create extension if not exists "uuid-ossp";
+create extension if not exists pg_trgm;
 
 create table if not exists replays (
   id uuid primary key default uuid_generate_v4(),
@@ -76,21 +77,28 @@ create index if not exists idx_replays_participation_id on replays(participation
 create unique index if not exists idx_replays_match_id_unique on replays(match_id) where match_id is not null;
 create index if not exists idx_replays_match_id on replays(match_id);
 create index if not exists idx_replays_player_name on replays(player_name);
+create index if not exists idx_replays_player_name_trgm on replays using gin (player_name gin_trgm_ops);
 create index if not exists idx_replays_pack on replays(pack);
 create index if not exists idx_replays_opponent_pack on replays(opponent_pack);
 create index if not exists idx_replays_game_version on replays(game_version);
 create index if not exists idx_replays_opponent_name on replays(opponent_name);
+create index if not exists idx_replays_opponent_name_trgm on replays using gin (opponent_name gin_trgm_ops);
 create index if not exists idx_replays_player_id on replays(player_id);
 create index if not exists idx_replays_opponent_id on replays(opponent_id);
+create index if not exists idx_replays_player_id_created_at on replays(player_id, created_at desc);
+create index if not exists idx_replays_opponent_id_created_at on replays(opponent_id, created_at desc);
 create index if not exists idx_replays_player_rank on replays(player_rank);
 create index if not exists idx_replays_opponent_rank on replays(opponent_rank);
 create index if not exists idx_replays_match_type on replays(match_type);
+create index if not exists idx_replays_match_name_trgm on replays using gin (match_name gin_trgm_ops);
 create index if not exists idx_replays_mode on replays(mode);
+create index if not exists idx_replays_created_at_desc on replays(created_at desc);
 create index if not exists idx_replays_tags on replays using gin (tags);
 create index if not exists idx_turns_turn_number on turns(turn_number);
 create index if not exists idx_turns_replay_id on turns(replay_id);
 create index if not exists idx_turns_outcome on turns(outcome);
 create index if not exists idx_turns_replay_turn_outcome on turns(replay_id, turn_number, outcome);
+create index if not exists idx_turns_replay_turn_desc on turns(replay_id, turn_number desc) include (outcome);
 create index if not exists idx_pets_pet_name on pets(pet_name);
 create index if not exists idx_pets_perk on pets(perk);
 create index if not exists idx_pets_toy on pets(toy);

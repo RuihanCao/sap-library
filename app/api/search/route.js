@@ -2,9 +2,14 @@ import { NextResponse } from "next/server";
 import { pool } from "@/lib/db";
 import { ensureHiddenPlayersTable, hiddenReplayClause } from "@/lib/hiddenPlayers";
 import { resolveVersionFilter } from "@/lib/versionFilter";
+import { getCachedPayload, setCachedPayload } from "@/lib/responseCache";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const SEARCH_CACHE_TTL_MS = 15_000;
+const SEARCH_CACHE_MAX_KEYS = 300;
+const SEARCH_CACHE_NAMESPACE = "search";
 
 function parseList(value) {
   if (!value) return [];
@@ -72,6 +77,17 @@ function extractParticipationId(input) {
 }
 
 export async function GET(req) {
+  const cacheKey = req.url;
+  const cachedPayload = getCachedPayload(SEARCH_CACHE_NAMESPACE, cacheKey, SEARCH_CACHE_TTL_MS);
+  if (cachedPayload) {
+    return NextResponse.json(cachedPayload, {
+      headers: {
+        "Cache-Control": "public, max-age=15, s-maxage=30, stale-while-revalidate=60",
+        "X-Search-Cache": "HIT"
+      }
+    });
+  }
+
   await ensureHiddenPlayersTable(pool);
   const { searchParams } = new URL(req.url);
   const player = searchParams.get("player");
@@ -607,11 +623,6 @@ export async function GET(req) {
   const fromSql = `from replays r`;
   const whereSql = clauses.length ? `where ${clauses.join(" and ")}` : "";
 
-  const countSql = `select count(*) as total ${fromSql} ${whereSql}`;
-  const countValues = values.slice();
-  const countResult = await pool.query(countSql, countValues);
-  const total = Number(countResult.rows[0]?.total || 0);
-
   values.push(pageSize, offset);
   const playerRankFallbackExpr = `case
     when ((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank') ~ '^[0-9]+$')
@@ -663,6 +674,7 @@ export async function GET(req) {
            r.max_player_count, r.active_player_count, r.created_at, r.tags, lt.outcome as last_outcome,
            ${playerIdExpr} as player_id,
            ${opponentIdExpr} as opponent_id,
+           count(*) over()::int as total_count,
            case
              when lower(coalesce(r.match_type, '')) = 'private' then ${privatePlayerDisplayRankExpr}
              else coalesce(
@@ -691,8 +703,18 @@ export async function GET(req) {
   `;
 
   const { rows } = await pool.query(dataSql, values);
+  const total = Number(rows[0]?.total_count || 0);
+  const results = rows.map(({ total_count: _totalCount, ...row }) => row);
+  const payload = { results, total, page, pageSize };
+  setCachedPayload(SEARCH_CACHE_NAMESPACE, cacheKey, payload, SEARCH_CACHE_MAX_KEYS);
+
   return NextResponse.json(
-    { results: rows, total, page, pageSize },
-    { headers: { "Cache-Control": "no-store" } }
+    payload,
+    {
+      headers: {
+        "Cache-Control": "public, max-age=15, s-maxage=30, stale-while-revalidate=60",
+        "X-Search-Cache": "MISS"
+      }
+    }
   );
 }
