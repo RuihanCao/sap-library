@@ -28,7 +28,7 @@
   --glow: rgba(74, 175, 230, 0.22);
   --overlay-1: rgba(9, 17, 34, 0.62);
   --overlay-2: rgba(9, 17, 34, 0.2);
-  --bg-image: none;
+  --bg-image: url("/Sprite/Background/FieldBuild.png");
 }
 
 * {
@@ -45,6 +45,7 @@ body {
     var(--bg-image);
   background-size: cover;
   background-position: center;
+  background-repeat: no-repeat;
   background-attachment: fixed;
   min-height: 100vh;
 }
@@ -2357,6 +2358,10 @@ button:hover:not(:disabled) {
 }
 
 @media (max-device-width: 900px), (pointer: coarse) {
+  body {
+    background-attachment: scroll;
+  }
+
   main {
     max-width: 100%;
     padding: 16px 12px 56px;

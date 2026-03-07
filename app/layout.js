@@ -1,4 +1,5 @@
 import "./globals.css";
+import { BackgroundGuard } from "@/app/components/background-guard";
 
 export const metadata = {
   title: "Sap Library",
@@ -21,6 +22,7 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en" suppressHydrationWarning>
       <body suppressHydrationWarning>
+        <BackgroundGuard />
         {children}
       </body>
     </html>
