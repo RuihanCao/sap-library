@@ -424,6 +424,8 @@ export default function StatsPage() {
     perk: false,
     toy: false
   });
+  const [expandedMatchupRows, setExpandedMatchupRows] = useState({});
+  const [matchupPerspectiveRows, setMatchupPerspectiveRows] = useState({});
   const [shareStatus, setShareStatus] = useState("");
   const [visibleRows, setVisibleRows] = useState({
     pack: STATS_INITIAL_BATCH,
@@ -573,6 +575,8 @@ export default function StatsPage() {
         perkStats: data.perkStats || [],
         toyStats: data.toyStats || []
       });
+      setExpandedMatchupRows({});
+      setMatchupPerspectiveRows({});
 
       if (!options.skipUrlSync) {
         const urlParams = buildStatsParams(nextFilters, options.uiState, { includePet: true });
@@ -711,6 +715,26 @@ export default function StatsPage() {
 
   function toggleCollapsed(sectionKey) {
     setCollapsed((prev) => ({ ...prev, [sectionKey]: !prev[sectionKey] }));
+  }
+
+  function toggleMatchupTurns(pack, opponentPack) {
+    const key = `${String(pack || "")}::${String(opponentPack || "")}`;
+    setExpandedMatchupRows((prev) => ({
+      ...prev,
+      [key]: !prev[key]
+    }));
+  }
+
+  function toggleMatchupPerspective(pack, opponentPack, defaultFlipped = false) {
+    const key = `${String(pack || "")}::${String(opponentPack || "")}`;
+    setMatchupPerspectiveRows((prev) => {
+      const hasOverride = Object.prototype.hasOwnProperty.call(prev, key);
+      const current = hasOverride ? Boolean(prev[key]) : Boolean(defaultFlipped);
+      return {
+        ...prev,
+        [key]: !current
+      };
+    });
   }
 
   function toggleFilterSection(sectionKey) {
@@ -1981,26 +2005,118 @@ export default function StatsPage() {
             const effectiveDraws = hasNoMirrorSample ? rateDraws : draws;
             const effectiveLosses = Math.max(0, effectiveGames - effectiveWins - effectiveDraws);
             const rateLabel = hasNoMirrorSample ? " (No Mirrors)" : "";
+            const matchupKey = `${String(row.pack || "")}::${String(row.opponent_pack || "")}`;
+            const matchupTurnId = `matchup-turn-${matchupKey.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+            const perTurnRows = Array.isArray(row.per_turn) ? row.per_turn : [];
+            const turnsExpanded = Boolean(expandedMatchupRows[matchupKey]);
+            const preferredPack = String(filters.pack || filters.opponentPack || "").trim().toLowerCase();
+            const packLeft = String(row.pack || "");
+            const packRight = String(row.opponent_pack || "");
+            const defaultFlipped = Boolean(
+              preferredPack &&
+              packLeft.toLowerCase() !== preferredPack &&
+              packRight.toLowerCase() === preferredPack
+            );
+            const hasPerspectiveOverride = Object.prototype.hasOwnProperty.call(matchupPerspectiveRows, matchupKey);
+            const isPerspectiveFlipped = hasPerspectiveOverride
+              ? Boolean(matchupPerspectiveRows[matchupKey])
+              : defaultFlipped;
+            const perspectivePack = isPerspectiveFlipped ? packRight : packLeft;
+            const perspectiveOpponentPack = isPerspectiveFlipped ? packLeft : packRight;
+            const perspectiveWins = isPerspectiveFlipped ? effectiveLosses : effectiveWins;
+            const perspectiveLosses = isPerspectiveFlipped ? effectiveWins : effectiveLosses;
             return (
               <div className="stats-card" key={`${row.pack}-${row.opponent_pack}`}>
                 <div className="stats-card-head">
                   <PackMatchupInline
-                    pack={row.pack}
-                    opponentPack={row.opponent_pack}
+                    pack={perspectivePack}
+                    opponentPack={perspectiveOpponentPack}
                     className="pack-matchup-inline stats-card-pack-inline"
                   />
                 </div>
                 <div className="stats-card-meta">
                   <span>{filters.scope === "battle" ? "Rounds" : "Games"}: {games}</span>
+                  <span>Perspective: {perspectivePack || "Unknown"}</span>
                 </div>
                 <div className="stats-card-metrics">
                   <div>Avg Turn Length: {formatTurns(avgGameLength)} turns</div>
-                  <div className="rate-win">Winrate{rateLabel}: {formatPct(effectiveGames ? effectiveWins / effectiveGames : 0)}</div>
-                  <div className="rate-loss">Lossrate{rateLabel}: {formatPct(effectiveGames ? effectiveLosses / effectiveGames : 0)}</div>
+                  <div className="rate-win">Winrate{rateLabel}: {formatPct(effectiveGames ? perspectiveWins / effectiveGames : 0)}</div>
+                  <div className="rate-loss">Lossrate{rateLabel}: {formatPct(effectiveGames ? perspectiveLosses / effectiveGames : 0)}</div>
                   {filters.scope === "battle" ? (
                     <div>Drawrate{rateLabel}: {formatPct(effectiveGames ? effectiveDraws / effectiveGames : 0)}</div>
                   ) : null}
                 </div>
+                <div className="stats-card-actions">
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={() => toggleMatchupPerspective(row.pack, row.opponent_pack, defaultFlipped)}
+                  >
+                    Switch to {perspectiveOpponentPack || "Other"} Perspective
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={() => toggleMatchupTurns(row.pack, row.opponent_pack)}
+                    aria-expanded={turnsExpanded}
+                    aria-controls={matchupTurnId}
+                  >
+                    {turnsExpanded ? "Hide Per Turn Metrics" : "Show Per Turn Metrics"}
+                  </button>
+                </div>
+                {turnsExpanded && (
+                  <div
+                    id={matchupTurnId}
+                    className="leaderboard-subtable stats-card-turns"
+                    style={{ "--turn-row-columns": "minmax(52px, 0.6fr) repeat(8, minmax(0, 1fr))" }}
+                  >
+                    <div className="leaderboard-subrow turn head">
+                      <span>
+                        <SemanticLabel type="turn">Turn</SemanticLabel>
+                      </span>
+                      <span>Rounds</span>
+                      <span>Wins</span>
+                      <span>Losses</span>
+                      <span>Draws</span>
+                      <span>Drawrate</span>
+                      <span>Winrate</span>
+                      <span>Avg Rolls</span>
+                      <span className="gold-text">Avg Gold</span>
+                    </div>
+                    {perTurnRows.map((turnRow) => (
+                      <div className="leaderboard-subrow turn" key={`${matchupKey}-turn-${turnRow.turn_number}`}>
+                        <span>{Number(turnRow.turn_number || 0)}</span>
+                        <span>{Number(turnRow.rounds || 0)}</span>
+                        <span className="rate-win">
+                          {isPerspectiveFlipped ? Number(turnRow.losses || 0) : Number(turnRow.wins || 0)}
+                        </span>
+                        <span className="rate-loss">
+                          {isPerspectiveFlipped ? Number(turnRow.wins || 0) : Number(turnRow.losses || 0)}
+                        </span>
+                        <span>{Number(turnRow.draws || 0)}</span>
+                        <span>{formatPct(Number(turnRow.drawrate || 0))}</span>
+                        <span className="rate-win">
+                          {formatPct(
+                            Number(turnRow.rounds || 0)
+                              ? (isPerspectiveFlipped
+                                  ? Number(turnRow.losses || 0)
+                                  : Number(turnRow.wins || 0)) / Number(turnRow.rounds || 0)
+                              : 0
+                          )}
+                        </span>
+                        <span>{formatTurns(Number(turnRow.avg_rolls_per_turn || 0))}</span>
+                        <span className="gold-text">{formatTurns(Number(turnRow.avg_gold_per_turn || 0))}</span>
+                      </div>
+                    ))}
+                    {!perTurnRows.length && (
+                      <div className="leaderboard-subrow empty">
+                        <span>
+                          <SemanticLabel type="turn">No turn-level rows.</SemanticLabel>
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })}

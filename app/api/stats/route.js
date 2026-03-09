@@ -456,6 +456,46 @@ export async function GET(req) {
       join outcomes o on o.replay_id = b.id
       where b.include_player_side or b.include_opponent_side
     ),
+    matchup_turn_source as (
+      select
+        case when b.pack <= b.opponent_pack then b.pack else b.opponent_pack end as pack,
+        case when b.pack <= b.opponent_pack then b.opponent_pack else b.pack end as opponent_pack,
+        t.turn_number,
+        case
+          when b.pack <= b.opponent_pack then t.outcome
+          when t.outcome = 1 then 2
+          when t.outcome = 2 then 1
+          else t.outcome
+        end::int as canonical_outcome,
+        case
+          when b.pack <= b.opponent_pack then coalesce(t.player_rolls, 0)
+          else coalesce(t.opponent_rolls, 0)
+        end::float8 as canonical_rolls,
+        case
+          when b.pack <= b.opponent_pack then coalesce(t.player_gold_spent, 0)
+          else coalesce(t.opponent_gold_spent, 0)
+        end::float8 as canonical_gold_spent
+      from base b
+      join turns t on t.replay_id = b.id
+      where b.include_player_side or b.include_opponent_side
+    ),
+    matchup_turn_stats_agg as (
+      select
+        mts.pack,
+        mts.opponent_pack,
+        mts.turn_number,
+        count(*)::int as rounds,
+        sum((mts.canonical_outcome = 1)::int)::int as wins,
+        sum((mts.canonical_outcome = 2)::int)::int as losses,
+        sum((mts.canonical_outcome = 3)::int)::int as draws,
+        case when count(*) > 0 then sum((mts.canonical_outcome = 1)::int)::float8 / count(*)::float8 else 0::float8 end as winrate,
+        case when count(*) > 0 then sum((mts.canonical_outcome = 2)::int)::float8 / count(*)::float8 else 0::float8 end as lossrate,
+        case when count(*) > 0 then sum((mts.canonical_outcome = 3)::int)::float8 / count(*)::float8 else 0::float8 end as drawrate,
+        avg(mts.canonical_rolls)::float8 as avg_rolls_per_turn,
+        avg(mts.canonical_gold_spent)::float8 as avg_gold_per_turn
+      from matchup_turn_source mts
+      group by mts.pack, mts.opponent_pack, mts.turn_number
+    ),
     combined_pet_any as (
       select pa.id, pa.pet_name, 'player'::text as side
       from pet_any pa
@@ -731,7 +771,17 @@ export async function GET(req) {
       (select count(*) from turns t join base b on b.id = t.replay_id) as total_battles,
       (select max(created_at) from base) as newest_entry_at,
       (select coalesce(json_agg(row_to_json(ps) order by ps.pack), '[]'::json) from pack_stats_agg ps where ps.rate_games >= $MIN_SAMPLE_SIZE) as pack_stats,
-      (select coalesce(json_agg(row_to_json(ms) order by ms.games desc, ms.pack asc, ms.opponent_pack asc), '[]'::json) from matchup_stats_agg ms where ms.rate_games >= $MIN_SAMPLE_SIZE or ms.pack = ms.opponent_pack) as matchup_stats,
+      (select coalesce(json_agg(row_to_json(ms_row) order by ms_row.games desc, ms_row.pack asc, ms_row.opponent_pack asc), '[]'::json) from (
+        select
+          ms.*,
+          coalesce((
+            select json_agg(row_to_json(mts) order by mts.turn_number asc)
+            from matchup_turn_stats_agg mts
+            where mts.pack = ms.pack and mts.opponent_pack = ms.opponent_pack
+          ), '[]'::json) as per_turn
+        from matchup_stats_agg ms
+        where ms.rate_games >= $MIN_SAMPLE_SIZE or ms.pack = ms.opponent_pack
+      ) ms_row) as matchup_stats,
       (select coalesce(json_agg(row_to_json(ps) order by ps.games_with desc, ps.pet_name asc), '[]'::json) from pet_stats_agg ps where true${minEndOnPetClause}) as pet_stats,
       (select coalesce(json_agg(row_to_json(ps) order by ps.games_with desc, ps.perk_name asc), '[]'::json) from perk_stats_agg ps where true${minEndOnPerkClause}) as perk_stats,
       (select coalesce(json_agg(row_to_json(ts) order by ts.games_with desc, ts.toy_name asc), '[]'::json) from toy_stats_agg ts where true${minEndOnToyClause}) as toy_stats
@@ -754,7 +804,15 @@ export async function GET(req) {
       where ${clauses.join(" and ")}
     ),
     turns_base as (
-      select t.id as turn_id, t.replay_id, t.turn_number, t.outcome
+      select
+        t.id as turn_id,
+        t.replay_id,
+        t.turn_number,
+        t.outcome,
+        coalesce(t.player_rolls, 0)::float8 as player_rolls,
+        coalesce(t.opponent_rolls, 0)::float8 as opponent_rolls,
+        coalesce(t.player_gold_spent, 0)::float8 as player_gold_spent,
+        coalesce(t.opponent_gold_spent, 0)::float8 as opponent_gold_spent
       from turns t
       join base b on b.id = t.replay_id
       where 1=1
@@ -803,14 +861,29 @@ export async function GET(req) {
       select
         tb.turn_id,
         tb.replay_id,
+        tb.turn_number,
         case when b.pack <= b.opponent_pack then b.pack else b.opponent_pack end as pack,
         case when b.pack <= b.opponent_pack then b.opponent_pack else b.pack end as opponent_pack,
+        case
+          when b.pack <= b.opponent_pack then tb.outcome
+          when tb.outcome = 1 then 2
+          when tb.outcome = 2 then 1
+          else tb.outcome
+        end::int as canonical_outcome,
         case
           when b.pack <= b.opponent_pack and tb.outcome = 1 then 1
           when b.pack > b.opponent_pack and tb.outcome = 2 then 1
           else 0
         end::int as canonical_wins,
         (tb.outcome = 3)::int as canonical_draws,
+        case
+          when b.pack <= b.opponent_pack then tb.player_rolls
+          else tb.opponent_rolls
+        end::float8 as canonical_rolls,
+        case
+          when b.pack <= b.opponent_pack then tb.player_gold_spent
+          else tb.opponent_gold_spent
+        end::float8 as canonical_gold_spent,
         b.is_mirror
       from turns_base tb
       join base b on b.id = tb.replay_id
@@ -901,6 +974,23 @@ export async function GET(req) {
       from matchup_games mg
       join replay_lengths rl on rl.replay_id = mg.replay_id
       group by mg.pack, mg.opponent_pack
+    ),
+    matchup_turn_stats_agg as (
+      select
+        mr.pack,
+        mr.opponent_pack,
+        mr.turn_number,
+        count(*)::int as rounds,
+        sum((mr.canonical_outcome = 1)::int)::int as wins,
+        sum((mr.canonical_outcome = 2)::int)::int as losses,
+        sum((mr.canonical_outcome = 3)::int)::int as draws,
+        case when count(*) > 0 then sum((mr.canonical_outcome = 1)::int)::float8 / count(*)::float8 else 0::float8 end as winrate,
+        case when count(*) > 0 then sum((mr.canonical_outcome = 2)::int)::float8 / count(*)::float8 else 0::float8 end as lossrate,
+        case when count(*) > 0 then sum((mr.canonical_outcome = 3)::int)::float8 / count(*)::float8 else 0::float8 end as drawrate,
+        avg(mr.canonical_rolls)::float8 as avg_rolls_per_turn,
+        avg(mr.canonical_gold_spent)::float8 as avg_gold_per_turn
+      from matchup_rounds mr
+      group by mr.pack, mr.opponent_pack, mr.turn_number
     )
     select
       (select count(*) from turns_base) as total_games,
@@ -933,7 +1023,7 @@ export async function GET(req) {
         having sum((not pr.is_mirror)::int) >= $MIN_SAMPLE_SIZE
         order by pr.pack
       ) cps) as pack_stats,
-      (select coalesce(json_agg(row_to_json(matchup_stats)), '[]'::json) from (
+      (select coalesce(json_agg(row_to_json(matchup_stats) order by matchup_stats.games desc, matchup_stats.pack asc, matchup_stats.opponent_pack asc), '[]'::json) from (
         select
           mr.pack as pack,
           mr.opponent_pack as opponent_pack,
@@ -943,7 +1033,12 @@ export async function GET(req) {
           sum((not mr.is_mirror)::int)::int as rate_games,
           sum(case when mr.is_mirror then 0 else mr.canonical_wins end)::int as rate_wins,
           sum(case when (not mr.is_mirror) then mr.canonical_draws else 0 end)::int as rate_draws,
-          mgl.avg_game_length
+          mgl.avg_game_length,
+          coalesce((
+            select json_agg(row_to_json(mts) order by mts.turn_number asc)
+            from matchup_turn_stats_agg mts
+            where mts.pack = mr.pack and mts.opponent_pack = mr.opponent_pack
+          ), '[]'::json) as per_turn
         from matchup_rounds mr
         left join matchup_game_lengths mgl on mgl.pack = mr.pack and mgl.opponent_pack = mr.opponent_pack
         group by mr.pack, mr.opponent_pack, mgl.avg_game_length
