@@ -6,6 +6,7 @@ import { LocalProfileMarker } from "@/app/components/local-profile-marker";
 import { PackInlineName, PackMatchupInline } from "@/app/components/pack-inline";
 import { fetchClientMeta } from "@/lib/clientMeta";
 import { LOCAL_PROFILE_EVENT, readLocalProfile } from "@/lib/localProfile";
+import { hasSummitTag } from "@/lib/replayTags";
 
 const BUILD_BACKGROUNDS = [
   "AboveCloudsBuild.png",
@@ -1253,13 +1254,6 @@ export default function Page() {
     const activeCount = Number(replay.active_player_count ?? 0);
     return Number.isFinite(activeCount) && activeCount > 2;
   };
-  const hasSummitTag = (tags) => {
-    if (!Array.isArray(tags)) return false;
-    return tags.some((tag) => {
-      const normalized = String(tag || "").trim().toLowerCase();
-      return normalized === "summit" || normalized.endsWith(":summit");
-    });
-  };
 
   const rawPct = bulkProgress.total > 0 ? (bulkProgress.done / bulkProgress.total) * 100 : 0;
   const pulseBoost = bulkProgress.active ? Math.min(0.9, progressPulse) : 0;
@@ -2052,7 +2046,7 @@ export default function Page() {
                       />
                     </span>
                   </div>
-                  <div><span className="label">Game Type</span><span>{(modalData.replay.match_type || "unknown").toUpperCase()}</span></div>
+                  <div><span className="label">Game Type</span><span>{hasSummitTag(modalData.replay.tags) ? "SUMMIT" : (modalData.replay.match_type || "unknown").toUpperCase()}</span></div>
                   <div><span className="label">Version</span><span>{modalData.replay.game_version || "?"}</span></div>
                   <div>
                     <span className="label">Played</span>

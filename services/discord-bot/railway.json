@@ -1,0 +1,23 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "builder": "RAILPACK",
+    "buildCommand": null,
+    "watchPatterns": [
+      "/services/discord-bot/**",
+      "/lib/**",
+      "/package.json",
+      "/package-lock.json",
+      "/pets.json",
+      "/perks.json",
+      "/toys.json",
+      "/food.json"
+    ]
+  },
+  "deploy": {
+    "startCommand": "npm run bot:discord",
+    "numReplicas": 1,
+    "restartPolicyType": "ALWAYS",
+    "restartPolicyMaxRetries": 10
+  }
+}

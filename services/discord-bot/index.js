@@ -247,7 +247,10 @@ async function handleUpload(interaction) {
       extraTags
     });
 
-    const tagResult = await appendReplayTags(ingestResult.replayId, botTags);
+    const tagResult = await appendReplayTags(ingestResult.replayId, botTags, {
+      participationId: ingestResult.participationId,
+      matchId: ingestResult.matchId
+    });
     const statusLabel = ingestStatusLabel(ingestResult.status);
 
     await interaction.editReply(
@@ -480,7 +483,10 @@ async function main() {
         return;
       }
 
-      const tagResult = await appendReplayTags(ingestResult.replayId, buildAutoIngestTags(message));
+      const tagResult = await appendReplayTags(ingestResult.replayId, buildAutoIngestTags(message), {
+        participationId: ingestResult.participationId,
+        matchId: ingestResult.matchId
+      });
       const statusLabel = ingestStatusLabel(ingestResult.status);
       await message.reply({
         content: [

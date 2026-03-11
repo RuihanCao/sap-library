@@ -7,6 +7,7 @@ import { SemanticLabel } from "@/app/components/semantic-label";
 import { LocalProfileMarker } from "@/app/components/local-profile-marker";
 import { fetchClientMeta } from "@/lib/clientMeta";
 import { clearLocalProfile, readLocalProfile, writeLocalProfile } from "@/lib/localProfile";
+import { hasSummitTag } from "@/lib/replayTags";
 
 const GOAT_PLAYER_ID = "310a80b8-0321-4e63-8924-eb462cce9221";
 const GOAT_TARGET_TURN = 11;
@@ -1612,6 +1613,11 @@ export default function ProfilePage() {
                 const worldOpponent = isArena(r.match_type) || isMulti(r);
                 const playerWon = Number(r.last_outcome) === 1;
                 const opponentWon = Number(r.last_outcome) === 2;
+                const summitGame = hasSummitTag(r.tags);
+                const summitClass = summitGame ? "summit-highlight" : "";
+                const rawGameType = (r.match_type || "unknown").toLowerCase();
+                const gameTypeLabel = summitGame ? "SUMMIT" : (r.match_type || "unknown").toUpperCase();
+                const gameTypeIcon = summitGame ? "/Sprite/OutlinedTrophy.png" : getGameTypeIcon(r.match_type);
                 const playerSideClass = playerWon ? "winner-side" : opponentWon ? "loser-side" : "";
                 const opponentSideClass = opponentWon ? "winner-side" : playerWon ? "loser-side" : "";
                 const playerPackClass = playerWon ? "winner-pack" : opponentWon ? "loser-pack" : "";
@@ -1623,7 +1629,7 @@ export default function ProfilePage() {
 
                 return gamesViewMode === "list" ? (
                   <div
-                    className="list-row"
+                    className={`list-row ${summitClass}`.trim()}
                     key={r.id}
                     role="button"
                     tabIndex={0}
@@ -1644,7 +1650,7 @@ export default function ProfilePage() {
                         <span className="vs-line">vs</span>
                         <PackInlineName name={r.opponent_pack} className={`pack-pill ${opponentPackClass}`} />
                       </div>
-                      <div className="list-matchup-sub">{(r.match_type || "unknown").toUpperCase()}</div>
+                      <div className="list-matchup-sub">{gameTypeLabel}</div>
                     </div>
 
                     <div className={`list-player list-player-right ${opponentSideClass}`}>
@@ -1660,7 +1666,7 @@ export default function ProfilePage() {
                     </div>
                   </div>
                 ) : (
-                  <div className="card" key={r.id} role="button" tabIndex={0} onClick={() => openModal(r.id)} onKeyDown={(e) => e.key === "Enter" && openModal(r.id)}>
+                  <div className={`card ${summitClass}`.trim()} key={r.id} role="button" tabIndex={0} onClick={() => openModal(r.id)} onKeyDown={(e) => e.key === "Enter" && openModal(r.id)}>
                     <div className="card-head">
                       <h3>
                         <span className={`name-line winner-line ${playerNameClass}`}>
@@ -1682,22 +1688,22 @@ export default function ProfilePage() {
                       </h3>
                       <div className="game-type">
                         <img
-                          src={getGameTypeIcon(r.match_type)}
-                          alt={r.match_type || "Unknown"}
+                          src={gameTypeIcon}
+                          alt={gameTypeLabel}
                           style={{
                             transform:
-                              (r.match_type || "unknown").toLowerCase() === "private"
+                              !summitGame && rawGameType === "private"
                                 ? "scaleX(-1)"
-                                : (r.match_type || "unknown").toLowerCase() === "ranked"
+                                : !summitGame && rawGameType === "ranked"
                                   ? "scale(1.15)"
                                   : "none"
                           }}
                         />
                         <span
                           className="game-type-label"
-                          style={{ fontSize: (r.match_type || "unknown").length > 6 ? "10px" : "11px" }}
+                          style={{ fontSize: gameTypeLabel.length > 6 ? "10px" : "11px" }}
                         >
-                          {(r.match_type || "unknown").toUpperCase()}
+                          {gameTypeLabel}
                         </span>
                       </div>
                     </div>
@@ -1781,7 +1787,7 @@ export default function ProfilePage() {
                       />
                     </span>
                   </div>
-                  <div><span className="label">Game Type</span><span>{(modalData.replay.match_type || "unknown").toUpperCase()}</span></div>
+                  <div><span className="label">Game Type</span><span>{hasSummitTag(modalData.replay.tags) ? "SUMMIT" : (modalData.replay.match_type || "unknown").toUpperCase()}</span></div>
                   <div><span className="label">Version</span><span>{modalData.replay.game_version || "?"}</span></div>
                   <div>
                     <span className="label">Played</span>

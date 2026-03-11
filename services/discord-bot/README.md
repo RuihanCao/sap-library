@@ -44,6 +44,21 @@ From repo root:
 npm run bot:discord
 ```
 
+## Deploy On Railway
+
+1. Create a new Railway service from this repo (worker/background service is fine, no public domain needed).
+2. In that service, open `Settings -> Build`.
+3. Set `Config as Code` file path to:
+   - `/services/discord-bot/railway.json`
+4. Add variables from `services/discord-bot/.env.example`:
+   - Required: `DATABASE_URL`, `DISCORD_BOT_TOKEN`, `DISCORD_APPLICATION_ID`
+   - Optional: guild/channel allowlists and auto-watch channel IDs
+5. Deploy the service.
+
+Expected startup logs include:
+- `Discord bot logged in as ...`
+- `Registered ... commands` (unless `DISCORD_REGISTER_COMMANDS=false`)
+
 ## Notes
 
 - If command registration appears delayed, use `DISCORD_GUILD_ID` during development.

@@ -1,5 +1,6 @@
 import "./globals.css";
 import { BackgroundGuard } from "@/app/components/background-guard";
+import { DarkModeImageGuard } from "@/app/components/dark-mode-image-guard";
 
 export const metadata = {
   title: "Sap Library",
@@ -23,6 +24,7 @@ export default function RootLayout({ children }) {
     <html lang="en" suppressHydrationWarning>
       <body suppressHydrationWarning>
         <BackgroundGuard />
+        <DarkModeImageGuard />
         {children}
       </body>
     </html>

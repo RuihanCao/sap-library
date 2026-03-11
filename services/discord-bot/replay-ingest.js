@@ -176,14 +176,15 @@ async function ingestParticipationReplay(rawParticipationId) {
   const client = await pool.connect();
   try {
     const existing = await client.query(
-      "select id from replays where participation_id = $1 limit 1",
+      "select id, match_id from replays where participation_id = $1 limit 1",
       [participationId]
     );
     if (existing.rowCount) {
       return {
         status: "exists_participation",
         replayId: existing.rows[0].id,
-        participationId
+        participationId,
+        matchId: existing.rows[0].match_id || null
       };
     }
 
@@ -204,7 +205,8 @@ async function ingestParticipationReplay(rawParticipationId) {
         return {
           status: "exists_match",
           replayId: existingMatch.rows[0].id,
-          participationId
+          participationId,
+          matchId: normalizedMatchId
         };
       }
     }
@@ -271,7 +273,8 @@ async function ingestParticipationReplay(rawParticipationId) {
         return {
           status: "exists_participation",
           replayId: existingByPid.rows[0].id,
-          participationId
+          participationId,
+          matchId: normalizedMatchId || null
         };
       }
 
@@ -284,7 +287,8 @@ async function ingestParticipationReplay(rawParticipationId) {
           return {
             status: "exists_match",
             replayId: existingByMatch.rows[0].id,
-            participationId
+            participationId,
+            matchId: normalizedMatchId
           };
         }
       }
@@ -364,17 +368,21 @@ async function ingestParticipationReplay(rawParticipationId) {
       });
     }
 
-    return { status: "inserted", replayId, participationId };
+    return { status: "inserted", replayId, participationId, matchId: normalizedMatchId || null };
   } finally {
     client.release();
   }
 }
 
-async function appendReplayTags(replayId, tags) {
+async function appendReplayTags(replayId, tags, options = {}) {
   const normalized = normalizeTags(tags);
   if (!normalized.length) {
     return { tags: [] };
   }
+
+  const replayIdText = replayId ? String(replayId) : null;
+  const participationId = options.participationId ? String(options.participationId) : null;
+  const matchId = options.matchId ? String(options.matchId) : null;
 
   const client = await pool.connect();
   try {
@@ -384,14 +392,18 @@ async function appendReplayTags(replayId, tags) {
          select coalesce(array_agg(distinct tag order by tag), '{}'::text[])
          from unnest(coalesce(r.tags, '{}'::text[]) || $1::text[]) as tag
        )
-       where r.id = $2
-       returning tags`,
-      [normalized, replayId]
+       where (
+         ($2::text is not null and r.id::text = $2::text)
+         or ($3::text is not null and r.participation_id = $3::text)
+         or ($4::text is not null and r.match_id = $4::text)
+       )
+       returning r.id, r.tags`,
+      [normalized, replayIdText, participationId, matchId]
     );
     if (!res.rowCount) {
       return { tags: [], updated: false };
     }
-    return { tags: res.rows[0].tags || [], updated: true };
+    return { replayId: res.rows[0].id || replayIdText, tags: res.rows[0].tags || [], updated: true };
   } finally {
     client.release();
   }
