@@ -90,6 +90,12 @@ const commands = [
   new SlashCommandBuilder()
     .setName("sap-watch-here")
     .setDescription("Enable replay auto-ingest in this channel")
+    .addStringOption((option) =>
+      option
+        .setName("tournament")
+        .setDescription("Tournament tag name (ex: summit-9)")
+        .setRequired(true)
+    )
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .toJSON(),
   new SlashCommandBuilder()
@@ -135,17 +141,24 @@ function buildBotTags(interaction, options) {
   return Array.from(new Set(tags.filter(Boolean)));
 }
 
-function buildAutoIngestTags(message) {
+function buildAutoIngestTags(message, tournamentTag) {
+  const normalizedTournament = normalizeTagToken(tournamentTag);
   const tags = [
     "source:discord",
-    "summit",
-    "mini",
-    "fuji",
     message.guildId ? `discord:guild:${message.guildId}` : null,
     message.channelId ? `discord:channel:${message.channelId}` : null,
     message.author?.id ? `discord:user:${message.author.id}` : null,
     message.author?.username ? `discord:username:${normalizeTagToken(message.author.username)}` : null
   ];
+
+  if (normalizedTournament) {
+    tags.push(`tournament:${normalizedTournament}`);
+    tags.push(normalizedTournament);
+  } else {
+    // Legacy fallback for static env channels that don't have DB watcher config.
+    tags.push("summit", "mini", "fuji");
+  }
+
   return Array.from(new Set(tags.map((tag) => normalizeTagToken(tag)).filter(Boolean)));
 }
 
@@ -168,10 +181,10 @@ function interactionAllowed(interaction) {
 
 let watchedChannelsByGuild = new Map();
 
-function addWatchedChannel(guildId, channelId) {
+function addWatchedChannel(guildId, channelId, tournamentTag) {
   if (!guildId || !channelId) return;
-  const existing = watchedChannelsByGuild.get(guildId) || new Set();
-  existing.add(channelId);
+  const existing = watchedChannelsByGuild.get(guildId) || new Map();
+  existing.set(channelId, tournamentTag ? normalizeTagToken(tournamentTag) : null);
   watchedChannelsByGuild.set(guildId, existing);
 }
 
@@ -190,11 +203,21 @@ function replaceWatchedChannels(rows) {
     const guildId = row.guild_id;
     const channelId = row.channel_id;
     if (!guildId || !channelId) continue;
-    const set = next.get(guildId) || new Set();
-    set.add(channelId);
-    next.set(guildId, set);
+    const byChannel = next.get(guildId) || new Map();
+    byChannel.set(
+      channelId,
+      row.tournament_tag ? normalizeTagToken(row.tournament_tag) : null
+    );
+    next.set(guildId, byChannel);
   }
   watchedChannelsByGuild = next;
+}
+
+function watchedChannelTournamentTag(guildId, channelId) {
+  if (!guildId || !channelId) return null;
+  const channels = watchedChannelsByGuild.get(guildId);
+  if (!channels || !channels.has(channelId)) return null;
+  return channels.get(channelId) || null;
 }
 
 function channelConfiguredForAutoIngest(guildId, channelId) {
@@ -290,15 +313,26 @@ async function handleWatchHere(interaction) {
     return;
   }
 
+  const tournamentInput = interaction.options.getString("tournament", true);
+  const tournamentTag = normalizeTagToken(tournamentInput);
+  if (!tournamentTag) {
+    await interaction.reply({
+      content: "Tournament name is required.",
+      ephemeral: true
+    });
+    return;
+  }
+
   await upsertDiscordIngestChannel({
     guildId: interaction.guildId,
     channelId: interaction.channelId,
+    tournamentTag,
     updatedBy: interaction.user?.id || null
   });
-  addWatchedChannel(interaction.guildId, interaction.channelId);
+  addWatchedChannel(interaction.guildId, interaction.channelId, tournamentTag);
 
   await interaction.reply({
-    content: `Auto-ingest enabled for <#${interaction.channelId}>.`,
+    content: `Auto-ingest enabled for <#${interaction.channelId}> with tournament:${tournamentTag}.`,
     ephemeral: true
   });
 }
@@ -352,8 +386,8 @@ async function handleWatchList(interaction) {
 
   const rows = await listDiscordIngestChannels();
   replaceWatchedChannels(rows);
-  const configured = watchedChannelsByGuild.get(guildId) || new Set();
-  const configuredList = [...configured];
+  const configured = watchedChannelsByGuild.get(guildId) || new Map();
+  const configuredList = [...configured.entries()];
 
   const staticList = AUTO_INGEST_CHANNEL_IDS.length
     ? `Static env channels: ${AUTO_INGEST_CHANNEL_IDS.map((id) => `<#${id}>`).join(", ")}`
@@ -368,7 +402,9 @@ async function handleWatchList(interaction) {
   }
 
   await interaction.reply({
-    content: `DB watched channels: ${configuredList.map((id) => `<#${id}>`).join(", ")}\n${staticList}`,
+    content: `DB watched channels: ${configuredList
+      .map(([channelId, tournamentTag]) => `<#${channelId}> (tournament:${tournamentTag || "unset"})`)
+      .join(", ")}\n${staticList}`,
     ephemeral: true
   });
 }
@@ -396,7 +432,9 @@ async function main() {
 
     console.log(`Discord bot logged in as ${client.user?.tag || "unknown user"}`);
     console.log(`Connected guilds: ${client.guilds.cache.size}`);
-    console.log(`Auto-ingest DB channels loaded: ${[...watchedChannelsByGuild.values()].reduce((acc, set) => acc + set.size, 0)}`);
+    console.log(
+      `Auto-ingest DB channels loaded: ${[...watchedChannelsByGuild.values()].reduce((acc, byChannel) => acc + byChannel.size, 0)}`
+    );
     console.log(`Auto-ingest env channels loaded: ${AUTO_INGEST_CHANNEL_IDS.length}`);
   });
 
@@ -483,7 +521,8 @@ async function main() {
         return;
       }
 
-      const tagResult = await appendReplayTags(ingestResult.replayId, buildAutoIngestTags(message), {
+      const tournamentTag = watchedChannelTournamentTag(message.guildId, message.channelId);
+      const tagResult = await appendReplayTags(ingestResult.replayId, buildAutoIngestTags(message, tournamentTag), {
         participationId: ingestResult.participationId,
         matchId: ingestResult.matchId
       });
