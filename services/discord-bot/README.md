@@ -19,6 +19,7 @@ Auto-ingest behavior:
 1. Run `/sap-watch-here tournament:<name>` in a channel you want to monitor.
 2. Any message in that channel containing a replay UUID/URL/payload will be ingested.
 3. The bot auto-tags the replay with: `tournament:<name>`, `<name>`, and Discord source metadata.
+4. For `fuji-mini-*` tournaments, it also adds: `summit`, `mini`, and `fuji`.
 
 ## Required env vars
 

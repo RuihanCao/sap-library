@@ -117,6 +117,15 @@ function normalizeTagToken(value) {
     .replace(/\s+/g, "-");
 }
 
+function getTournamentCompanionTags(tournamentTag) {
+  const normalizedTournament = normalizeTagToken(tournamentTag);
+  if (!normalizedTournament) return [];
+  if (normalizedTournament.startsWith("fuji-mini-")) {
+    return ["summit", "mini", "fuji"];
+  }
+  return [];
+}
+
 function buildBotTags(interaction, options) {
   const tags = [
     "source:discord",
@@ -126,7 +135,9 @@ function buildBotTags(interaction, options) {
   ];
 
   if (options.tournament) {
-    tags.push(`tournament:${normalizeTagToken(options.tournament)}`);
+    const normalizedTournament = normalizeTagToken(options.tournament);
+    tags.push(`tournament:${normalizedTournament}`);
+    tags.push(...getTournamentCompanionTags(normalizedTournament));
   }
   if (options.player) {
     tags.push(`player:${normalizeTagToken(options.player)}`);
@@ -154,6 +165,7 @@ function buildAutoIngestTags(message, tournamentTag) {
   if (normalizedTournament) {
     tags.push(`tournament:${normalizedTournament}`);
     tags.push(normalizedTournament);
+    tags.push(...getTournamentCompanionTags(normalizedTournament));
   } else {
     // Legacy fallback for static env channels that don't have DB watcher config.
     tags.push("summit", "mini", "fuji");
