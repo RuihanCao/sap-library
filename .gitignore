@@ -2,6 +2,9 @@
 .env.local
 node_modules
 notes.md
+tmp/
+AGENTS.md
+
 # Next.js / build output
 .next/
 out/

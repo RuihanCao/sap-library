@@ -1,43 +1,105 @@
 ﻿import { NextResponse } from "next/server";
 import { pool } from "@/lib/db";
 const { parseReplay } = require("@/lib/parse");
-const { API_VERSION } = require("@/lib/config");
-const { getAuthToken } = require("@/lib/teamwood");
+const { fetchParticipationReplay } = require("@/lib/sapPlayback");
 const { rateLimit, applyRateLimitHeaders, rateLimitResponse } = require("@/lib/rateLimit");
+const { registerReplayInsertAndMaybeStartTopBoards } = require("@/lib/topBoardsAutoRun");
 
 export const runtime = "nodejs";
 
-async function fetchReplay(participationId) {
-  const token = await getAuthToken();
-  const url = `https://api.teamwood.games/0.${API_VERSION}/api/playback/participation`;
+function normalizeTopBoardsMatchType(value) {
+  const type = String(value || "").trim().toLowerCase();
+  if (type === "ranked" || type === "private" || type === "arena") return type;
+  return null;
+}
 
-  const makeRequest = async (authToken) =>
-    fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${authToken}`
-      },
-      body: JSON.stringify({
-        ParticipationId: participationId,
-        Turn: 1,
-        Version: API_VERSION
-      })
-    });
+function isFiniteRank(value) {
+  return Number.isFinite(value) ? value : null;
+}
 
-  let res = await makeRequest(token);
-  if (res.status === 401) {
-    const freshToken = await getAuthToken();
-    res = await makeRequest(freshToken);
+function sanitizeRanksForMatchType(parsed) {
+  if (String(parsed?.matchType || "").toLowerCase() !== "private") {
+    return parsed;
+  }
+  return {
+    ...parsed,
+    playerRank: null,
+    opponentRank: null
+  };
+}
+
+function pickBestRankPair(primaryPlayerRank, primaryOpponentRank, mirroredPlayerRank, mirroredOpponentRank) {
+  const primaryDistinct =
+    primaryPlayerRank !== null &&
+    primaryOpponentRank !== null &&
+    primaryPlayerRank !== primaryOpponentRank;
+  const mirroredDistinct =
+    mirroredPlayerRank !== null &&
+    mirroredOpponentRank !== null &&
+    mirroredPlayerRank !== mirroredOpponentRank;
+
+  if (!primaryDistinct && mirroredDistinct) {
+    return {
+      playerRank: mirroredPlayerRank,
+      opponentRank: mirroredOpponentRank
+    };
   }
 
-  if (!res.ok) {
-    const errorText = await res.text();
-    console.error("Replay fetch failed", { status: res.status, body: errorText, participationId });
-    throw new Error(`Replay fetch failed: ${res.status}`);
+  if (primaryDistinct && !mirroredDistinct) {
+    return {
+      playerRank: primaryPlayerRank,
+      opponentRank: primaryOpponentRank
+    };
   }
 
-  return res.json();
+  return {
+    playerRank: primaryPlayerRank ?? mirroredPlayerRank,
+    opponentRank: primaryOpponentRank ?? mirroredOpponentRank
+  };
+}
+
+async function enrichReplayWithOpponentRank(raw, parsed, participationId) {
+  const primaryPlayerRank = isFiniteRank(parsed.playerRank);
+  const primaryOpponentRank = isFiniteRank(parsed.opponentRank);
+  let playerRank = primaryPlayerRank;
+  let opponentRank = primaryOpponentRank;
+  let opponentId = parsed.opponentId || null;
+  let opponentParticipationId = parsed.opponentParticipationId || null;
+
+  if (opponentParticipationId && opponentParticipationId !== participationId) {
+    try {
+      const opponentRaw = await fetchParticipationReplay(opponentParticipationId);
+      const opponentParsed = parseReplay(opponentRaw);
+      opponentId = opponentParsed.playerId || opponentId;
+      const opponentSidePlayerRank = isFiniteRank(opponentParsed.playerRank);
+      const opponentSideOpponentRank = isFiniteRank(opponentParsed.opponentRank);
+      const selected = pickBestRankPair(
+        primaryPlayerRank,
+        primaryOpponentRank,
+        opponentSideOpponentRank,
+        opponentSidePlayerRank
+      );
+      playerRank = selected.playerRank;
+      opponentRank = selected.opponentRank;
+    } catch (error) {
+      console.warn("Opponent replay fetch failed during rank enrichment (bulk)", {
+        participationId,
+        opponentParticipationId,
+        error: error?.message || "failed"
+      });
+    }
+  }
+
+  return {
+    raw,
+    parsed: {
+      ...parsed,
+      playerRank,
+      opponentRank,
+      opponentId,
+      opponentParticipationId
+    }
+  };
 }
 
 export async function POST(req) {
@@ -58,6 +120,11 @@ export async function POST(req) {
   let skippedParticipation = 0;
   let skippedMatch = 0;
   let failed = 0;
+  const insertedByMatchType = {
+    ranked: 0,
+    private: 0,
+    arena: 0
+  };
   const failedEntries = [];
 
   try {
@@ -77,10 +144,13 @@ export async function POST(req) {
       }
 
       try {
-        const raw = await fetchReplay(participationId);
+        const raw = await fetchParticipationReplay(participationId);
         const parsed = parseReplay(raw);
+        const enriched = await enrichReplayWithOpponentRank(raw, parsed, participationId);
+        const finalRaw = enriched.raw;
+        const finalParsed = sanitizeRanksForMatchType(enriched.parsed);
         const normalizedMatchId =
-          (parsed.matchType || "").toLowerCase() === "arena" ? null : parsed.matchId;
+          (finalParsed.matchType || "").toLowerCase() === "arena" ? null : finalParsed.matchId;
         if (normalizedMatchId) {
           const existingMatch = await client.query(
             "select id from replays where match_id=$1",
@@ -94,20 +164,54 @@ export async function POST(req) {
         }
 
         const replayRes = await client.query(
-          `insert into replays (participation_id, match_id, player_name, opponent_name, pack, opponent_pack, game_version, max_lives, raw_json)
-           values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          `insert into replays (
+             participation_id,
+             match_id,
+             player_name,
+             opponent_name,
+             pack,
+             opponent_pack,
+             game_version,
+             max_lives,
+             mode,
+             match_type,
+             match_name,
+             match_pack,
+             max_player_count,
+             active_player_count,
+             spectator_mode,
+             player_id,
+             opponent_id,
+             opponent_participation_id,
+             player_rank,
+             opponent_rank,
+             raw_json
+           )
+           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
            on conflict do nothing
            returning id`,
           [
             participationId,
             normalizedMatchId,
-            parsed.playerName,
-            parsed.opponentName,
-            parsed.packName,
-            parsed.opponentPackName,
-            parsed.gameVersion,
-            parsed.maxLives,
-            raw
+            finalParsed.playerName,
+            finalParsed.opponentName,
+            finalParsed.packName,
+            finalParsed.opponentPackName,
+            finalParsed.gameVersion,
+            finalParsed.maxLives,
+            finalParsed.mode,
+            finalParsed.matchType,
+            finalParsed.matchName,
+            finalParsed.matchPack,
+            finalParsed.maxPlayerCount,
+            finalParsed.activePlayerCount,
+            finalParsed.spectatorMode,
+            finalParsed.playerId,
+            finalParsed.opponentId,
+            finalParsed.opponentParticipationId,
+            finalParsed.playerRank,
+            finalParsed.opponentRank,
+            finalRaw
           ]
         );
         const replayId = replayRes.rows[0]?.id;
@@ -139,7 +243,7 @@ export async function POST(req) {
           continue;
         }
 
-        for (const t of parsed.turns) {
+        for (const t of finalParsed.turns) {
           await client.query(
             `insert into turns (
                replay_id,
@@ -171,7 +275,7 @@ export async function POST(req) {
           );
         }
 
-        for (const p of parsed.pets) {
+        for (const p of finalParsed.pets) {
           await client.query(
             `insert into pets (replay_id, turn_number, side, position, pet_name, level, attack, health, perk, toy)
              values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
@@ -191,10 +295,43 @@ export async function POST(req) {
         }
 
         inserted += 1;
+        const topBoardsMatchType = normalizeTopBoardsMatchType(finalParsed.matchType);
+        if (topBoardsMatchType) {
+          insertedByMatchType[topBoardsMatchType] += 1;
+        }
       } catch (err) {
         console.error("Bulk ingest failed", { participationId, error: err.message });
         failed += 1;
         failedEntries.push({ participationId, reason: err.message || "failed" });
+      }
+    }
+
+    if (inserted > 0) {
+      try {
+        for (const [matchType, count] of Object.entries(insertedByMatchType)) {
+          if (!count) continue;
+          const autoRun = await registerReplayInsertAndMaybeStartTopBoards({
+            db: pool,
+            source: "api.replays.bulk",
+            matchType,
+            incrementBy: count,
+            replayCreatedAt: new Date().toISOString(),
+            logger: console
+          });
+          if (autoRun?.triggered) {
+            console.log("Top boards autorun queued from bulk replay ingest", {
+              runId: autoRun.runId,
+              pendingReplays: autoRun.pendingReplays,
+              matchType,
+              inserted: count
+            });
+          }
+        }
+      } catch (autoRunError) {
+        console.warn("Top boards autorun check failed after bulk replay insert", {
+          insertedByMatchType,
+          error: autoRunError?.message || autoRunError
+        });
       }
     }
 

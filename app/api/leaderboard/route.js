@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
 import { pool } from "@/lib/db";
+import { ensureHiddenPlayersTable, hiddenReplayClause } from "@/lib/hiddenPlayers";
+import { resolveVersionFilter } from "@/lib/versionFilter";
+import { getCachedPayload, setCachedPayload } from "@/lib/responseCache";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -7,6 +10,10 @@ export const dynamic = "force-dynamic";
 const EXCLUDED_PACKS = ["Custom", "Weekly"];
 const DEFAULT_PAGE_SIZE = 25;
 const MAX_PAGE_SIZE = 100;
+const MIN_MATCH_THRESHOLD = 1;
+const LEADERBOARD_CACHE_TTL_MS = 20_000;
+const LEADERBOARD_CACHE_MAX_KEYS = 250;
+const LEADERBOARD_CACHE_NAMESPACE = "leaderboard";
 
 function parseList(value) {
   if (!value) return [];
@@ -30,6 +37,9 @@ function parseNullableInt(value) {
 }
 
 function buildBaseCte() {
+  const replayPlayerIdExpr = `coalesce(r.player_id, nullif(r.raw_json->>'UserId', ''))`;
+  const replayOpponentIdExpr = `coalesce(r.opponent_id, nullif((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'UserId'), ''))`;
+  const hiddenClause = hiddenReplayClause(replayPlayerIdExpr, replayOpponentIdExpr);
   return `
     with replay_base as (
       select
@@ -39,16 +49,18 @@ function buildBaseCte() {
         r.opponent_pack as opponent_pack,
         r.player_name,
         r.opponent_name,
-        nullif(r.raw_json->>'UserId', '') as player_id,
-        nullif((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'UserId'), '') as opponent_id,
+        coalesce(r.player_id, nullif(r.raw_json->>'UserId', '')) as player_id,
+        coalesce(r.opponent_id, nullif((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'UserId'), '')) as opponent_id,
         coalesce(r.tags, '{}'::text[]) as tags
       from replays r
       where r.match_type != 'arena'
         and r.pack is not null
         and r.opponent_pack is not null
+        and ${hiddenClause}
         and r.pack != all($1::text[])
         and r.opponent_pack != all($1::text[])
         and ($2::text[] is null or coalesce(r.tags, '{}'::text[]) && $2::text[])
+        and ($14::text[] is null or r.game_version = any($14::text[]))
     ),
     spotlight_base as (
       select
@@ -156,7 +168,9 @@ function buildOrder(scope, sortKey, order) {
           drawrate: "j.drawrate",
           avg_rolls: "j.avg_rolls_per_turn",
           avg_gold: "j.avg_gold_per_turn",
-          avg_summons: "j.avg_summons_per_turn"
+          avg_elo: "j.avg_elo",
+          avg_summons: "j.avg_summons_per_turn",
+          avg_game_length: "j.avg_game_length"
         }
       : {
           player_name: "j.player_name",
@@ -170,7 +184,9 @@ function buildOrder(scope, sortKey, order) {
           drawrate: "j.drawrate",
           avg_rolls: "j.avg_rolls_per_turn",
           avg_gold: "j.avg_gold_per_turn",
-          avg_summons: "j.avg_summons_per_turn"
+          avg_elo: "j.avg_elo",
+          avg_summons: "j.avg_summons_per_turn",
+          avg_game_length: "j.avg_game_length"
         };
   const column = sortMap[sortKey] || "j.games";
   return `${column} ${direction}, j.player_name asc`;
@@ -219,6 +235,57 @@ function buildGameSql(orderBy) {
       from turn_rows tr
       group by tr.spotlight_id
     ),
+    player_ranked_replays as (
+      select distinct
+        tr.spotlight_id as player_id,
+        tr.replay_id,
+        case
+          when tr.side = 'player' then coalesce(
+            r.player_rank,
+            case
+              when ((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank') ~ '^[0-9]+$')
+                then (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank')::int
+              else null
+            end
+          )
+          else coalesce(
+            r.opponent_rank,
+            case
+              when ((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank') ~ '^[0-9]+$')
+                then (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank')::int
+              else null
+            end
+          )
+        end as rank
+      from turn_rows tr
+      join replays r on r.id = tr.replay_id
+      where lower(coalesce(r.match_type, '')) = 'ranked'
+    ),
+    player_avg_elo as (
+      select
+        prr.player_id,
+        avg(prr.rank::float8)::float8 as avg_elo
+      from player_ranked_replays prr
+      where prr.rank is not null
+      group by prr.player_id
+    ),
+    player_pack_counts as (
+      select
+        go.spotlight_id as player_id,
+        go.my_pack as pack,
+        count(*)::int as pack_games,
+        max(go.created_at) as last_seen_at
+      from game_outcomes go
+      where go.my_pack is not null
+      group by go.spotlight_id, go.my_pack
+    ),
+    player_top_pack as (
+      select distinct on (ppc.player_id)
+        ppc.player_id,
+        ppc.pack as most_played_pack
+      from player_pack_counts ppc
+      order by ppc.player_id, ppc.pack_games desc, ppc.last_seen_at desc, ppc.pack asc
+    ),
     joined as (
       select
         pr.player_id,
@@ -242,10 +309,18 @@ function buildGameSql(orderBy) {
         end as drawrate,
         coalesce(pta.avg_rolls_per_turn, 0::float8) as avg_rolls_per_turn,
         coalesce(pta.avg_gold_per_turn, 0::float8) as avg_gold_per_turn,
-        coalesce(pta.avg_summons_per_turn, 0::float8) as avg_summons_per_turn
+        coalesce(pae.avg_elo, 0::float8) as avg_elo,
+        coalesce(pta.avg_summons_per_turn, 0::float8) as avg_summons_per_turn,
+        case
+          when pr.games > 0 then coalesce(ptc.rounds, 0)::float8 / pr.games::float8
+          else 0::float8
+        end as avg_game_length,
+        ptp.most_played_pack
       from player_rollup pr
       left join player_turn_counts ptc on ptc.player_id = pr.player_id
       left join player_turn_avgs pta on pta.player_id = pr.player_id
+      left join player_avg_elo pae on pae.player_id = pr.player_id
+      left join player_top_pack ptp on ptp.player_id = pr.player_id
     )
     select
       j.player_id,
@@ -260,7 +335,10 @@ function buildGameSql(orderBy) {
       j.drawrate,
       j.avg_rolls_per_turn,
       j.avg_gold_per_turn,
+      j.avg_elo,
       j.avg_summons_per_turn,
+      j.avg_game_length,
+      j.most_played_pack,
       count(*) over()::int as total_players
     from joined j
     where j.games >= $11::int
@@ -289,6 +367,57 @@ function buildBattleSql(orderBy) {
       from turn_rows tr
       group by tr.spotlight_id
     ),
+    player_ranked_replays as (
+      select distinct
+        tr.spotlight_id as player_id,
+        tr.replay_id,
+        case
+          when tr.side = 'player' then coalesce(
+            r.player_rank,
+            case
+              when ((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank') ~ '^[0-9]+$')
+                then (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->>'Rank')::int
+              else null
+            end
+          )
+          else coalesce(
+            r.opponent_rank,
+            case
+              when ((nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank') ~ '^[0-9]+$')
+                then (nullif(r.raw_json->>'GenesisModeModel', '')::jsonb->'Opponents'->0->>'Rank')::int
+              else null
+            end
+          )
+        end as rank
+      from turn_rows tr
+      join replays r on r.id = tr.replay_id
+      where lower(coalesce(r.match_type, '')) = 'ranked'
+    ),
+    player_avg_elo as (
+      select
+        prr.player_id,
+        avg(prr.rank::float8)::float8 as avg_elo
+      from player_ranked_replays prr
+      where prr.rank is not null
+      group by prr.player_id
+    ),
+    player_pack_counts as (
+      select
+        tr.spotlight_id as player_id,
+        tr.my_pack as pack,
+        count(*)::int as pack_rounds,
+        max(tr.created_at) as last_seen_at
+      from turn_rows tr
+      where tr.my_pack is not null
+      group by tr.spotlight_id, tr.my_pack
+    ),
+    player_top_pack as (
+      select distinct on (ppc.player_id)
+        ppc.player_id,
+        ppc.pack as most_played_pack
+      from player_pack_counts ppc
+      order by ppc.player_id, ppc.pack_rounds desc, ppc.last_seen_at desc, ppc.pack asc
+    ),
     joined as (
       select
         pr.player_id,
@@ -312,8 +441,16 @@ function buildBattleSql(orderBy) {
         end as drawrate,
         coalesce(pr.avg_rolls_per_turn, 0::float8) as avg_rolls_per_turn,
         coalesce(pr.avg_gold_per_turn, 0::float8) as avg_gold_per_turn,
-        coalesce(pr.avg_summons_per_turn, 0::float8) as avg_summons_per_turn
+        coalesce(pae.avg_elo, 0::float8) as avg_elo,
+        coalesce(pr.avg_summons_per_turn, 0::float8) as avg_summons_per_turn,
+        case
+          when pr.games > 0 then pr.rounds::float8 / pr.games::float8
+          else 0::float8
+        end as avg_game_length,
+        ptp.most_played_pack
       from player_rollup pr
+      left join player_avg_elo pae on pae.player_id = pr.player_id
+      left join player_top_pack ptp on ptp.player_id = pr.player_id
     )
     select
       j.player_id,
@@ -328,7 +465,10 @@ function buildBattleSql(orderBy) {
       j.drawrate,
       j.avg_rolls_per_turn,
       j.avg_gold_per_turn,
+      j.avg_elo,
       j.avg_summons_per_turn,
+      j.avg_game_length,
+      j.most_played_pack,
       count(*) over()::int as total_players
     from joined j
     where j.games >= $11::int
@@ -339,10 +479,29 @@ function buildBattleSql(orderBy) {
 }
 
 export async function GET(req) {
+  const cacheKey = req.url;
+  const cachedPayload = getCachedPayload(
+    LEADERBOARD_CACHE_NAMESPACE,
+    cacheKey,
+    LEADERBOARD_CACHE_TTL_MS
+  );
+  if (cachedPayload) {
+    return NextResponse.json(cachedPayload, {
+      headers: {
+        "Cache-Control": "public, max-age=30, s-maxage=60, stale-while-revalidate=120",
+        "X-Leaderboard-Cache": "HIT"
+      }
+    });
+  }
+
+  await ensureHiddenPlayersTable(pool);
   const { searchParams } = new URL(req.url);
   const scope = (searchParams.get("scope") || "game").toLowerCase() === "battle" ? "battle" : "game";
   const search = searchParams.get("search")?.trim() || "";
-  const minMatches = parsePositiveInt(searchParams.get("minMatches"), 1);
+  const minMatches = Math.max(
+    MIN_MATCH_THRESHOLD,
+    parsePositiveInt(searchParams.get("minMatches"), MIN_MATCH_THRESHOLD)
+  );
   const pageSize = Math.min(MAX_PAGE_SIZE, parsePositiveInt(searchParams.get("pageSize"), DEFAULT_PAGE_SIZE));
   const page = parsePositiveInt(searchParams.get("page"), 1);
   const offset = (page - 1) * pageSize;
@@ -358,9 +517,10 @@ export async function GET(req) {
   const minTurn = scope === "battle" ? minTurnRaw : null;
   const maxTurn = scope === "battle" ? maxTurnRaw : null;
 
-  const sort = (searchParams.get("sort") || "games").toLowerCase();
+  const sort = (searchParams.get("sort") || "winrate").toLowerCase();
   const order = (searchParams.get("order") || "desc").toLowerCase() === "asc" ? "asc" : "desc";
   const orderBy = buildOrder(scope, sort, order);
+  const { versions } = await resolveVersionFilter(pool, searchParams.get("version"));
 
   const values = [
     EXCLUDED_PACKS,
@@ -375,39 +535,45 @@ export async function GET(req) {
     search ? `%${search}%` : null,
     minMatches,
     pageSize,
-    offset
+    offset,
+    versions?.length ? versions : null
   ];
 
   const sql = scope === "battle" ? buildBattleSql(orderBy) : buildGameSql(orderBy);
   const { rows } = await pool.query(sql, values);
   const total = Number(rows[0]?.total_players || 0);
 
-  return NextResponse.json(
-    {
-      scope,
-      page,
-      pageSize,
-      total,
-      players: rows.map((row) => ({
-        playerId: row.player_id,
-        playerName: row.player_name,
-        games: Number(row.games || 0),
-        rounds: Number(row.rounds || 0),
-        wins: Number(row.wins || 0),
-        losses: Number(row.losses || 0),
-        draws: Number(row.draws || 0),
-        winrate: Number(row.winrate || 0),
-        lossrate: Number(row.lossrate || 0),
-        drawrate: Number(row.drawrate || 0),
-        avgRollsPerTurn: Number(row.avg_rolls_per_turn || 0),
-        avgGoldPerTurn: Number(row.avg_gold_per_turn || 0),
-        avgSummonsPerTurn: Number(row.avg_summons_per_turn || 0)
-      }))
-    },
-    {
-      headers: {
-        "Cache-Control": "public, max-age=30, s-maxage=60, stale-while-revalidate=120"
-      }
+  const payload = {
+    scope,
+    page,
+    pageSize,
+    total,
+    players: rows.map((row) => ({
+      playerId: row.player_id,
+      playerName: row.player_name,
+      games: Number(row.games || 0),
+      rounds: Number(row.rounds || 0),
+      wins: Number(row.wins || 0),
+      losses: Number(row.losses || 0),
+      draws: Number(row.draws || 0),
+      winrate: Number(row.winrate || 0),
+      lossrate: Number(row.lossrate || 0),
+      drawrate: Number(row.drawrate || 0),
+      avgRollsPerTurn: Number(row.avg_rolls_per_turn || 0),
+      avgGoldPerTurn: Number(row.avg_gold_per_turn || 0),
+      avgElo: Number(row.avg_elo || 0),
+      avgSummonsPerTurn: Number(row.avg_summons_per_turn || 0),
+      avgGameLength: Number(row.avg_game_length || 0),
+      mostPlayedPack: row.most_played_pack || null
+    }))
+  };
+
+  setCachedPayload(LEADERBOARD_CACHE_NAMESPACE, cacheKey, payload, LEADERBOARD_CACHE_MAX_KEYS);
+
+  return NextResponse.json(payload, {
+    headers: {
+      "Cache-Control": "public, max-age=30, s-maxage=60, stale-while-revalidate=120",
+      "X-Leaderboard-Cache": "MISS"
     }
-  );
+  });
 }

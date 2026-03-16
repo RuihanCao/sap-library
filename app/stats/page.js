@@ -1,7 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { getPackSprite } from "@/lib/packSprites";
+import { fetchClientMeta } from "@/lib/clientMeta";
+import { SemanticLabel } from "@/app/components/semantic-label";
+import { PackMatchupInline } from "@/app/components/pack-inline";
+import { LocalProfileMarker } from "@/app/components/local-profile-marker";
 
 const BUILD_BACKGROUNDS = [
   "AboveCloudsBuild.png",
@@ -146,6 +151,15 @@ const THEMES = {
 };
 
 const EXCLUDED_PACKS = ["Custom", "Weekly"];
+const defaultSortForScope = (scope) => (scope === "battle" ? "winrate" : "pickrate");
+const FILTER_FALLBACK_SPRITES = {
+  pet: "/Sprite/Pets/Turtle.png",
+  perk: "/Sprite/Food/Honey.png",
+  toy: "/Sprite/Toys/RelicFoamSword.png",
+  turn: "/hourglass-twemoji.png"
+};
+const STATS_INITIAL_BATCH = 24;
+const STATS_BATCH_SIZE = 24;
 
 function parseCsvList(value) {
   if (!value) return [];
@@ -155,12 +169,31 @@ function parseCsvList(value) {
     .filter(Boolean);
 }
 
+function normalizeSortMetric(value) {
+  return value === "presence" ? "pickrate" : value;
+}
+
+function pickFilterSprite(list, fallbackSprite) {
+  const sprite = Array.isArray(list) ? list.find((item) => item?.sprite)?.sprite : "";
+  return sprite || fallbackSprite;
+}
+
 const DEFAULT_STATS_FILTERS = {
   scope: "game",
   player: "",
   playerId: "",
+  version: "current",
   pack: "",
   opponentPack: "",
+  winningPack: "",
+  losingPack: "",
+  excludePack: "",
+  excludeMirrors: false,
+  minSample: "10",
+  minEndOn: "",
+  minElo: "",
+  maxElo: "",
+  itemPack: "",
   minTurn: "",
   maxTurn: "",
   pet: [],
@@ -174,6 +207,14 @@ const DEFAULT_STATS_FILTERS = {
   allyToy: [],
   opponentToy: [],
   tags: ""
+};
+
+const DEFAULT_FILTER_SECTION_VISIBILITY = {
+  general: false,
+  matchup: false,
+  thresholds: false,
+  items: false,
+  advanced: false
 };
 
 function pickTheme(name) {
@@ -200,8 +241,15 @@ function pickTheme(name) {
 }
 
 function formatPct(value) {
-  if (!Number.isFinite(value) || value <= 0) return "0%";
-  return `${(value * 100).toFixed(1)}%`;
+  if (!Number.isFinite(value)) return "0.00%";
+  const clamped = Math.max(0, Math.min(1, value));
+  return `${(clamped * 100).toFixed(2)}%`;
+}
+
+function formatTurns(value) {
+  const parsed = Number(value || 0);
+  if (!Number.isFinite(parsed)) return "0.00";
+  return parsed.toFixed(2);
 }
 
 function IconSelect({ label, options, value, onChange, placeholder }) {
@@ -335,24 +383,33 @@ function IconMultiSelect({ label, options, selected, onChange, placeholder }) {
 }
 
 export default function StatsPage() {
-  const [meta, setMeta] = useState({ pets: [], perks: [], toys: [], packs: [] });
+  const [meta, setMeta] = useState({
+    pets: [],
+    perks: [],
+    toys: [],
+    packs: [],
+    versions: [],
+    currentVersion: null
+  });
   const [filters, setFilters] = useState(DEFAULT_STATS_FILTERS);
+  const [visibleFilterSections, setVisibleFilterSections] = useState(DEFAULT_FILTER_SECTION_VISIBILITY);
   const [stats, setStats] = useState({
     totalGames: 0,
     totalBattles: 0,
     generatedAt: null,
     newestEntryAt: null,
     packStats: [],
+    matchupStats: [],
     petStats: [],
     perkStats: [],
     toyStats: []
   });
   const [loading, setLoading] = useState(false);
-  const [petSort, setPetSort] = useState("buyWinrate");
+  const [petSort, setPetSort] = useState(defaultSortForScope(DEFAULT_STATS_FILTERS.scope));
   const [petOrder, setPetOrder] = useState("desc");
-  const [perkSort, setPerkSort] = useState("buyWinrate");
+  const [perkSort, setPerkSort] = useState(defaultSortForScope(DEFAULT_STATS_FILTERS.scope));
   const [perkOrder, setPerkOrder] = useState("desc");
-  const [toySort, setToySort] = useState("buyWinrate");
+  const [toySort, setToySort] = useState(defaultSortForScope(DEFAULT_STATS_FILTERS.scope));
   const [toyOrder, setToyOrder] = useState("desc");
   const [viewMode, setViewMode] = useState("card");
   const [sortMenuOpen, setSortMenuOpen] = useState({
@@ -360,7 +417,31 @@ export default function StatsPage() {
     perk: false,
     toy: false
   });
+  const [collapsed, setCollapsed] = useState({
+    pack: false,
+    matchup: false,
+    pet: false,
+    perk: false,
+    toy: false
+  });
+  const [expandedMatchupRows, setExpandedMatchupRows] = useState({});
+  const [matchupPerspectiveRows, setMatchupPerspectiveRows] = useState({});
   const [shareStatus, setShareStatus] = useState("");
+  const [visibleRows, setVisibleRows] = useState({
+    pack: STATS_INITIAL_BATCH,
+    pet: STATS_INITIAL_BATCH,
+    perk: STATS_INITIAL_BATCH,
+    toy: STATS_INITIAL_BATCH,
+    matchup: STATS_INITIAL_BATCH
+  });
+  const packSentinelRef = useRef(null);
+  const petSentinelRef = useRef(null);
+  const perkSentinelRef = useRef(null);
+  const toySentinelRef = useRef(null);
+  const matchupSentinelRef = useRef(null);
+  const autoSearchTimeoutRef = useRef(null);
+  const autoSearchReadyRef = useRef(false);
+  const lastAppliedNetworkKeyRef = useRef("");
 
   useEffect(() => {
     if (!BUILD_BACKGROUNDS.length) return;
@@ -374,21 +455,23 @@ export default function StatsPage() {
   }, []);
 
   useEffect(() => {
-    fetch("/api/meta")
-      .then((res) => res.json())
-      .then((data) => setMeta({
-        pets: data.pets || [],
-        perks: data.perks || [],
-        toys: data.toys || [],
-        packs: data.packs || []
-      }))
-      .catch(() => setMeta({ pets: [], perks: [], toys: [], packs: [] }));
+    fetchClientMeta().then(setMeta);
   }, []);
 
   const packOptions = useMemo(() => meta.packs.filter((pack) => !EXCLUDED_PACKS.includes(pack.name)), [meta.packs]);
   const petOptions = useMemo(() => meta.pets, [meta.pets]);
   const perkOptions = useMemo(() => meta.perks, [meta.perks]);
   const toyOptions = useMemo(() => meta.toys, [meta.toys]);
+  const petFilterSprite = pickFilterSprite(meta.pets, FILTER_FALLBACK_SPRITES.pet);
+  const perkFilterSprite = pickFilterSprite(meta.perks, FILTER_FALLBACK_SPRITES.perk);
+  const toyFilterSprite = pickFilterSprite(meta.toys, FILTER_FALLBACK_SPRITES.toy);
+  const turnFilterSprite = FILTER_FALLBACK_SPRITES.turn;
+
+  function clearAutoSearchTimeout() {
+    if (!autoSearchTimeoutRef.current) return;
+    clearTimeout(autoSearchTimeoutRef.current);
+    autoSearchTimeoutRef.current = null;
+  }
 
   function buildStatsParams(
     nextFilters = filters,
@@ -400,20 +483,32 @@ export default function StatsPage() {
       perkOrderValue: perkOrder,
       toySortValue: toySort,
       toyOrderValue: toyOrder
-    }
+    },
+    options = {}
   ) {
+    const { includePet = true, includePerk = true, includeToy = true } = options;
     const params = new URLSearchParams();
     if (nextFilters.scope) params.set("scope", nextFilters.scope);
     if (nextFilters.player) params.set("player", nextFilters.player);
     if (nextFilters.playerId) params.set("playerId", nextFilters.playerId);
+    if (nextFilters.version) params.set("version", nextFilters.version);
     if (nextFilters.pack) params.set("pack", nextFilters.pack);
     if (nextFilters.opponentPack) params.set("opponentPack", nextFilters.opponentPack);
+    if (nextFilters.winningPack) params.set("winningPack", nextFilters.winningPack);
+    if (nextFilters.losingPack) params.set("losingPack", nextFilters.losingPack);
+    if (nextFilters.excludePack) params.set("excludePack", nextFilters.excludePack);
+    if (nextFilters.excludeMirrors) params.set("excludeMirrors", "true");
+    if (nextFilters.minSample) params.set("minSample", nextFilters.minSample);
+    if (nextFilters.minEndOn) params.set("minEndOn", nextFilters.minEndOn);
+    if (nextFilters.minElo) params.set("minElo", nextFilters.minElo);
+    if (nextFilters.maxElo) params.set("maxElo", nextFilters.maxElo);
+    if (nextFilters.itemPack) params.set("itemPack", nextFilters.itemPack);
     if (nextFilters.minTurn) params.set("minTurn", nextFilters.minTurn);
     if (nextFilters.maxTurn) params.set("maxTurn", nextFilters.maxTurn);
-    if (nextFilters.pet?.length) params.set("pet", nextFilters.pet.join(","));
+    if (includePet && nextFilters.pet?.length) params.set("pet", nextFilters.pet.join(","));
     if (nextFilters.petLevel) params.set("petLevel", nextFilters.petLevel);
-    if (nextFilters.perk?.length) params.set("perk", nextFilters.perk.join(","));
-    if (nextFilters.toy?.length) params.set("toy", nextFilters.toy.join(","));
+    if (includePerk && nextFilters.perk?.length) params.set("perk", nextFilters.perk.join(","));
+    if (includeToy && nextFilters.toy?.length) params.set("toy", nextFilters.toy.join(","));
     if (nextFilters.allyPet?.length) params.set("allyPet", nextFilters.allyPet.join(","));
     if (nextFilters.opponentPet?.length) params.set("opponentPet", nextFilters.opponentPet.join(","));
     if (nextFilters.allyPerk?.length) params.set("allyPerk", nextFilters.allyPerk.join(","));
@@ -423,21 +518,48 @@ export default function StatsPage() {
     if (nextFilters.tags) params.set("tags", nextFilters.tags);
 
     params.set("uiView", uiState.viewModeValue || "card");
-    params.set("uiPetSort", uiState.petSortValue || "buyWinrate");
+    params.set("uiPetSort", uiState.petSortValue || defaultSortForScope(nextFilters.scope));
     params.set("uiPetOrder", uiState.petOrderValue || "desc");
-    params.set("uiPerkSort", uiState.perkSortValue || "buyWinrate");
+    params.set("uiPerkSort", uiState.perkSortValue || defaultSortForScope(nextFilters.scope));
     params.set("uiPerkOrder", uiState.perkOrderValue || "desc");
-    params.set("uiToySort", uiState.toySortValue || "buyWinrate");
+    params.set("uiToySort", uiState.toySortValue || defaultSortForScope(nextFilters.scope));
     params.set("uiToyOrder", uiState.toyOrderValue || "desc");
 
     return params;
   }
 
+  function syncStatsUrl(nextFilters = filters, uiState) {
+    const params = buildStatsParams(nextFilters, uiState, { includePet: true });
+    const nextUrl = params.toString() ? `?${params.toString()}` : window.location.pathname;
+    window.history.replaceState({}, "", nextUrl);
+  }
+
+  function buildNetworkFilterKey(nextFilters = filters) {
+    const params = buildStatsParams(nextFilters, {
+      viewModeValue: viewMode,
+      petSortValue: petSort,
+      petOrderValue: petOrder,
+      perkSortValue: perkSort,
+      perkOrderValue: perkOrder,
+      toySortValue: toySort,
+      toyOrderValue: toyOrder
+    }, { includePet: false, includePerk: false, includeToy: false });
+    params.delete("uiView");
+    params.delete("uiPetSort");
+    params.delete("uiPetOrder");
+    params.delete("uiPerkSort");
+    params.delete("uiPerkOrder");
+    params.delete("uiToySort");
+    params.delete("uiToyOrder");
+    return params.toString();
+  }
+
   async function loadStats(nextFilters = filters, options = {}) {
     const params = options.paramsOverride
       ? new URLSearchParams(options.paramsOverride.toString())
-      : buildStatsParams(nextFilters, options.uiState);
+      : buildStatsParams(nextFilters, options.uiState, { includePet: false, includePerk: false, includeToy: false });
 
+    lastAppliedNetworkKeyRef.current = buildNetworkFilterKey(nextFilters);
     setLoading(true);
     try {
       const res = await fetch(`/api/stats?${params.toString()}`);
@@ -448,13 +570,17 @@ export default function StatsPage() {
         generatedAt: data.generatedAt || null,
         newestEntryAt: data.newestEntryAt || null,
         packStats: data.packStats || [],
+        matchupStats: data.matchupStats || [],
         petStats: data.petStats || [],
         perkStats: data.perkStats || [],
         toyStats: data.toyStats || []
       });
+      setExpandedMatchupRows({});
+      setMatchupPerspectiveRows({});
 
       if (!options.skipUrlSync) {
-        const nextUrl = params.toString() ? `?${params.toString()}` : window.location.pathname;
+        const urlParams = buildStatsParams(nextFilters, options.uiState, { includePet: true });
+        const nextUrl = urlParams.toString() ? `?${urlParams.toString()}` : window.location.pathname;
         window.history.replaceState({}, "", nextUrl);
       }
     } finally {
@@ -466,9 +592,15 @@ export default function StatsPage() {
     const urlParams = new URLSearchParams(window.location.search);
     const hasQuery = Array.from(urlParams.keys()).length > 0;
 
+    autoSearchReadyRef.current = false;
     if (!hasQuery) {
-      loadStats(DEFAULT_STATS_FILTERS);
-      return;
+      loadStats(DEFAULT_STATS_FILTERS).finally(() => {
+        autoSearchReadyRef.current = true;
+      });
+      return () => {
+        clearAutoSearchTimeout();
+        autoSearchReadyRef.current = false;
+      };
     }
 
     const nextFilters = {
@@ -476,8 +608,18 @@ export default function StatsPage() {
       scope: urlParams.get("scope") || "game",
       player: urlParams.get("player") || "",
       playerId: urlParams.get("playerId") || "",
+      version: urlParams.get("version") || "current",
       pack: urlParams.get("pack") || "",
       opponentPack: urlParams.get("opponentPack") || "",
+      winningPack: urlParams.get("winningPack") || "",
+      losingPack: urlParams.get("losingPack") || "",
+      excludePack: urlParams.get("excludePack") || "",
+      excludeMirrors: urlParams.get("excludeMirrors") === "true",
+      minSample: urlParams.get("minSample") || "10",
+      minEndOn: urlParams.get("minEndOn") || "",
+      minElo: urlParams.get("minElo") || "",
+      maxElo: urlParams.get("maxElo") || "",
+      itemPack: urlParams.get("itemPack") || "",
       minTurn: urlParams.get("minTurn") || "",
       maxTurn: urlParams.get("maxTurn") || "",
       pet: parseCsvList(urlParams.get("pet")),
@@ -494,11 +636,11 @@ export default function StatsPage() {
     };
 
     const nextViewMode = urlParams.get("uiView") || "card";
-    const nextPetSort = urlParams.get("uiPetSort") || "buyWinrate";
+    const nextPetSort = normalizeSortMetric(urlParams.get("uiPetSort") || defaultSortForScope(nextFilters.scope));
     const nextPetOrder = urlParams.get("uiPetOrder") || "desc";
-    const nextPerkSort = urlParams.get("uiPerkSort") || "buyWinrate";
+    const nextPerkSort = normalizeSortMetric(urlParams.get("uiPerkSort") || defaultSortForScope(nextFilters.scope));
     const nextPerkOrder = urlParams.get("uiPerkOrder") || "desc";
-    const nextToySort = urlParams.get("uiToySort") || "buyWinrate";
+    const nextToySort = normalizeSortMetric(urlParams.get("uiToySort") || defaultSortForScope(nextFilters.scope));
     const nextToyOrder = urlParams.get("uiToyOrder") || "desc";
 
     setFilters(nextFilters);
@@ -518,10 +660,47 @@ export default function StatsPage() {
       perkOrderValue: nextPerkOrder,
       toySortValue: nextToySort,
       toyOrderValue: nextToyOrder
+    }, { includePet: false, includePerk: false, includeToy: false });
+
+    loadStats(nextFilters, { paramsOverride: hydratedParams, skipUrlSync: true }).finally(() => {
+      autoSearchReadyRef.current = true;
     });
 
-    loadStats(nextFilters, { paramsOverride: hydratedParams, skipUrlSync: true });
+    return () => {
+      clearAutoSearchTimeout();
+      autoSearchReadyRef.current = false;
+    };
   }, []);
+
+  const networkAutoSearchKey = useMemo(() => {
+    const networkFilters = { ...filters };
+    delete networkFilters.pet;
+    delete networkFilters.perk;
+    delete networkFilters.toy;
+    return JSON.stringify(networkFilters);
+  }, [filters]);
+  const localItemFilterKey = useMemo(
+    () => JSON.stringify({ pet: filters.pet, perk: filters.perk, toy: filters.toy }),
+    [filters.pet, filters.perk, filters.toy]
+  );
+
+  useEffect(() => {
+    if (!autoSearchReadyRef.current) return;
+    clearAutoSearchTimeout();
+    const nextKey = buildNetworkFilterKey(filters);
+    autoSearchTimeoutRef.current = setTimeout(() => {
+      autoSearchTimeoutRef.current = null;
+      if (nextKey === lastAppliedNetworkKeyRef.current) return;
+      loadStats(filters);
+    }, 1500);
+
+    return () => clearAutoSearchTimeout();
+  }, [networkAutoSearchKey]);
+
+  useEffect(() => {
+    if (!autoSearchReadyRef.current) return;
+    syncStatsUrl(filters);
+  }, [localItemFilterKey]);
 
   async function copyShareLink() {
     try {
@@ -534,33 +713,59 @@ export default function StatsPage() {
     }
   }
 
+  function toggleCollapsed(sectionKey) {
+    setCollapsed((prev) => ({ ...prev, [sectionKey]: !prev[sectionKey] }));
+  }
+
+  function toggleMatchupTurns(pack, opponentPack) {
+    const key = `${String(pack || "")}::${String(opponentPack || "")}`;
+    setExpandedMatchupRows((prev) => ({
+      ...prev,
+      [key]: !prev[key]
+    }));
+  }
+
+  function toggleMatchupPerspective(pack, opponentPack, defaultFlipped = false) {
+    const key = `${String(pack || "")}::${String(opponentPack || "")}`;
+    setMatchupPerspectiveRows((prev) => {
+      const hasOverride = Object.prototype.hasOwnProperty.call(prev, key);
+      const current = hasOverride ? Boolean(prev[key]) : Boolean(defaultFlipped);
+      return {
+        ...prev,
+        [key]: !current
+      };
+    });
+  }
+
+  function toggleFilterSection(sectionKey) {
+    setVisibleFilterSections((prev) => ({ ...prev, [sectionKey]: !prev[sectionKey] }));
+  }
+
   const petSprite = (name) => petOptions.find((pet) => pet.name === name)?.sprite;
   const perkSprite = (name) => perkOptions.find((perk) => perk.name === name)?.sprite;
   const toySprite = (name) => toyOptions.find((toy) => toy.name === name)?.sprite;
-  const packSprite = (name) => {
-    const map = {
-      Turtle: "/Sprite/Pets/Turtle.png",
-      Puppy: "/Sprite/Pets/Puppy.png",
-      Star: "/Sprite/Pets/Starfish.png",
-      Golden: "/Sprite/Pets/GoldenRetriever.png",
-      Unicorn: "/Sprite/Pets/Unicorn.png",
-      Danger: "/Sprite/Pets/BlueWhale.png"
-    };
-    return map[name] || null;
-  };
+  const packSprite = (name) => getPackSprite(name);
   const packOrderMap = {
     Turtle: 0,
     Puppy: 1,
     Star: 2,
-    Custom: 3,
-    Weekly: 4,
-    Golden: 5,
-    Unicorn: 6,
-    Danger: 7
+    Golden: 3,
+    Unicorn: 4,
+    Danger: 5,
+    Custom: 6,
+    Weekly: 7,
+    Unassigned: 99
   };
+  const petMetaMap = useMemo(() => new Map((petOptions || []).map((entry) => [entry.name, entry])), [petOptions]);
+  const perkMetaMap = useMemo(() => new Map((perkOptions || []).map((entry) => [entry.name, entry])), [perkOptions]);
+  const toyMetaMap = useMemo(() => new Map((toyOptions || []).map((entry) => [entry.name, entry])), [toyOptions]);
+  const itemPackFilter = filters.itemPack || "";
+  const appearanceLabel = filters.scope === "battle" ? "Round Share" : "Appearance Rate";
   const itemSortOptions = filters.scope === "battle"
     ? [
         { value: "name", label: "Name" },
+        { value: "pack", label: "Pack Group" },
+        { value: "tier", label: "Tier" },
         { value: "count", label: "Rounds" },
         { value: "winrate", label: "Winrate" },
         { value: "lossrate", label: "Lossrate" },
@@ -568,8 +773,10 @@ export default function StatsPage() {
       ]
     : [
         { value: "name", label: "Name" },
+        { value: "pack", label: "Pack Group" },
+        { value: "tier", label: "Tier" },
         { value: "buyCount", label: "Buy Count" },
-        { value: "pickrate", label: "Pickrate" },
+        { value: "pickrate", label: appearanceLabel },
         { value: "buyWinrate", label: "Winrate (Buy)" },
         { value: "buyLossrate", label: "Lossrate (Buy)" },
         { value: "endCount", label: "End Count" },
@@ -577,20 +784,103 @@ export default function StatsPage() {
         { value: "endWinrate", label: "Winrate (End)" },
         { value: "endLossrate", label: "Lossrate (End)" }
       ];
-  const sortRows = (rows, getValue, order) => {
-    const direction = order === "desc" ? -1 : 1;
-    return [...rows].sort((a, b) => {
-      const av = getValue(a);
-      const bv = getValue(b);
-      if (av == null && bv == null) return 0;
-      if (av == null) return 1;
-      if (bv == null) return -1;
-      if (typeof av === "string" || typeof bv === "string") {
-        return direction * String(av).localeCompare(String(bv));
+  const expandWithMeta = (rows, nameKey, metaMap, sortMetric) => {
+    const duplicateByPack = sortMetric === "pack";
+    const result = [];
+    for (const row of rows) {
+      const name = row[nameKey];
+      const meta = metaMap.get(name) || {};
+      const tier = Number.isFinite(Number(meta?.tier)) ? Number(meta.tier) : null;
+      const rawPacks = Array.isArray(meta?.packs) && meta.packs.length ? meta.packs : ["Unassigned"];
+      const selectedPacks = itemPackFilter ? rawPacks.filter((packName) => packName === itemPackFilter) : rawPacks;
+      if (!selectedPacks.length) continue;
+
+      if (duplicateByPack) {
+        for (const packName of selectedPacks) {
+          result.push({ ...row, _tier: tier, _pack: packName });
+        }
+      } else {
+        result.push({ ...row, _tier: tier, _pack: selectedPacks[0] });
       }
-      return direction * (Number(av) - Number(bv));
-    });
+    }
+    return result;
   };
+
+  const compareRows = (a, b, sortMetric, order, totalGamesValue, nameKey) => {
+    const direction = order === "desc" ? -1 : 1;
+    const games = Number(totalGamesValue || 0);
+
+    const calcMetric = (row) => {
+      const gamesWith = Number(row.games_with || 0);
+      const winsWith = Number(row.wins_with || 0);
+      const drawsWith = Number(row.draws_with || 0);
+      const lossesWith = Math.max(0, gamesWith - winsWith - drawsWith);
+      const gamesEnd = Number(row.games_end || 0);
+      const winsEnd = Number(row.wins_end || 0);
+      const drawsEnd = Number(row.draws_end || 0);
+      const lossesEnd = Math.max(0, gamesEnd - winsEnd - drawsEnd);
+
+      switch (sortMetric) {
+        case "name":
+          return row[nameKey];
+        case "pack":
+          return packOrderMap[row._pack] ?? 999;
+        case "tier":
+          return row._tier ?? 999;
+        case "count":
+          return gamesWith;
+        case "winrate":
+          return gamesWith ? winsWith / gamesWith : 0;
+        case "lossrate":
+          return gamesWith ? lossesWith / gamesWith : 0;
+        case "drawrate":
+          return gamesWith ? drawsWith / gamesWith : 0;
+        case "buyCount":
+          return gamesWith;
+        case "presence":
+        case "pickrate":
+          return games ? gamesWith / games : 0;
+        case "buyWinrate":
+          return gamesWith ? winsWith / gamesWith : 0;
+        case "buyLossrate":
+          return gamesWith ? lossesWith / gamesWith : 0;
+        case "endCount":
+          return gamesEnd;
+        case "endRate":
+          return games ? gamesEnd / games : 0;
+        case "endWinrate":
+          return gamesEnd ? winsEnd / gamesEnd : 0;
+        case "endLossrate":
+          return gamesEnd ? lossesEnd / gamesEnd : 0;
+        default:
+          return row[nameKey];
+      }
+    };
+
+    const av = calcMetric(a);
+    const bv = calcMetric(b);
+
+    let metricCompare = 0;
+    if (typeof av === "string" || typeof bv === "string") {
+      metricCompare = direction * String(av).localeCompare(String(bv));
+    } else {
+      metricCompare = direction * (Number(av) - Number(bv));
+    }
+    if (metricCompare !== 0) return metricCompare;
+
+    if (sortMetric === "pack") {
+      const tierA = Number.isFinite(Number(a._tier)) ? Number(a._tier) : Number.POSITIVE_INFINITY;
+      const tierB = Number.isFinite(Number(b._tier)) ? Number(b._tier) : Number.POSITIVE_INFINITY;
+      if (tierA !== tierB) return tierA - tierB;
+    }
+
+    if (sortMetric !== "pack") {
+      const packCompare = (packOrderMap[a._pack] ?? 999) - (packOrderMap[b._pack] ?? 999);
+      if (packCompare !== 0) return packCompare;
+    }
+    return String(a[nameKey] || "").localeCompare(String(b[nameKey] || ""));
+  };
+
   const sortedPackStats = useMemo(() => {
     return [...stats.packStats].sort((a, b) => {
       const av = packOrderMap[a.pack] ?? 999;
@@ -599,146 +889,157 @@ export default function StatsPage() {
       return String(a.pack || "").localeCompare(String(b.pack || ""));
     });
   }, [stats.packStats]);
+  const sortedMatchupStats = useMemo(() => {
+    return [...(stats.matchupStats || [])].sort((a, b) => {
+      const gameDiff = Number(b.games || 0) - Number(a.games || 0);
+      if (gameDiff !== 0) return gameDiff;
+
+      const aRateGames = Number(a.rate_games || 0);
+      const bRateGames = Number(b.rate_games || 0);
+      const aGames = Number(a.games || 0);
+      const bGames = Number(b.games || 0);
+      const aWins = Number(a.wins || 0);
+      const bWins = Number(b.wins || 0);
+      const aWinrate = aRateGames ? Number(a.rate_wins || 0) / aRateGames : (aGames ? aWins / aGames : 0);
+      const bWinrate = bRateGames ? Number(b.rate_wins || 0) / bRateGames : (bGames ? bWins / bGames : 0);
+      if (bWinrate !== aWinrate) return bWinrate - aWinrate;
+
+      const packDiff = (packOrderMap[a.pack] ?? 999) - (packOrderMap[b.pack] ?? 999);
+      if (packDiff !== 0) return packDiff;
+
+      const opponentPackDiff = (packOrderMap[a.opponent_pack] ?? 999) - (packOrderMap[b.opponent_pack] ?? 999);
+      if (opponentPackDiff !== 0) return opponentPackDiff;
+
+      const packNameDiff = String(a.pack || "").localeCompare(String(b.pack || ""));
+      if (packNameDiff !== 0) return packNameDiff;
+
+      return String(a.opponent_pack || "").localeCompare(String(b.opponent_pack || ""));
+    });
+  }, [stats.matchupStats]);
+  const filteredPetStats = useMemo(() => {
+    const minSampleValue = Number(filters.minSample);
+    const minSampleThreshold = Number.isFinite(minSampleValue) ? Math.max(0, minSampleValue) : 10;
+    const selectedPets = new Set(filters.pet || []);
+    return (stats.petStats || []).filter((row) => {
+      if (selectedPets.size && !selectedPets.has(row.pet_name)) return false;
+      const gamesWith = Number(row.games_with || 0);
+      return gamesWith >= minSampleThreshold || selectedPets.has(row.pet_name);
+    });
+  }, [stats.petStats, filters.pet, filters.minSample]);
+  const filteredPerkStats = useMemo(() => {
+    const minSampleValue = Number(filters.minSample);
+    const minSampleThreshold = Number.isFinite(minSampleValue) ? Math.max(0, minSampleValue) : 10;
+    const selectedPerks = new Set(filters.perk || []);
+    return (stats.perkStats || []).filter((row) => {
+      if (selectedPerks.size && !selectedPerks.has(row.perk_name)) return false;
+      const gamesWith = Number(row.games_with || 0);
+      return gamesWith >= minSampleThreshold || selectedPerks.has(row.perk_name);
+    });
+  }, [stats.perkStats, filters.perk, filters.minSample]);
+  const filteredToyStats = useMemo(() => {
+    const minSampleValue = Number(filters.minSample);
+    const minSampleThreshold = Number.isFinite(minSampleValue) ? Math.max(0, minSampleValue) : 10;
+    const selectedToys = new Set(filters.toy || []);
+    return (stats.toyStats || []).filter((row) => {
+      if (selectedToys.size && !selectedToys.has(row.toy_name)) return false;
+      const gamesWith = Number(row.games_with || 0);
+      return gamesWith >= minSampleThreshold || selectedToys.has(row.toy_name);
+    });
+  }, [stats.toyStats, filters.toy, filters.minSample]);
   const sortedPetStats = useMemo(() => {
-    return sortRows(stats.petStats, (row) => {
-      const games = Number(stats.totalGames || 0);
-      const gamesWith = Number(row.games_with || 0);
-      const winsWith = Number(row.wins_with || 0);
-      const drawsWith = Number(row.draws_with || 0);
-      const lossesWith = Math.max(0, gamesWith - winsWith - drawsWith);
-      const gamesEnd = Number(row.games_end || 0);
-      const winsEnd = Number(row.wins_end || 0);
-      const drawsEnd = Number(row.draws_end || 0);
-      const lossesEnd = Math.max(0, gamesEnd - winsEnd - drawsEnd);
-      switch (petSort) {
-        case "name":
-          return row.pet_name;
-        case "count":
-          return gamesWith;
-        case "winrate":
-          return gamesWith ? winsWith / gamesWith : 0;
-        case "lossrate":
-          return gamesWith ? lossesWith / gamesWith : 0;
-        case "drawrate":
-          return gamesWith ? drawsWith / gamesWith : 0;
-        case "buyCount":
-          return gamesWith;
-        case "pickrate":
-          return games ? gamesWith / games : 0;
-        case "buyWinrate":
-          return gamesWith ? winsWith / gamesWith : 0;
-        case "buyLossrate":
-          return gamesWith ? lossesWith / gamesWith : 0;
-        case "endCount":
-          return gamesEnd;
-        case "endRate":
-          return games ? gamesEnd / games : 0;
-        case "endWinrate":
-          return gamesEnd ? winsEnd / gamesEnd : 0;
-        case "endLossrate":
-          return gamesEnd ? lossesEnd / gamesEnd : 0;
-        default:
-          return row.pet_name;
-      }
-    }, petOrder);
-  }, [stats.petStats, stats.totalGames, petSort, petOrder]);
+    return expandWithMeta(filteredPetStats, "pet_name", petMetaMap, petSort).sort((a, b) =>
+      compareRows(a, b, petSort, petOrder, stats.totalGames, "pet_name")
+    );
+  }, [filteredPetStats, stats.totalGames, petSort, petOrder, petMetaMap, itemPackFilter]);
   const sortedPerkStats = useMemo(() => {
-    return sortRows(stats.perkStats, (row) => {
-      const games = Number(stats.totalGames || 0);
-      const gamesWith = Number(row.games_with || 0);
-      const winsWith = Number(row.wins_with || 0);
-      const drawsWith = Number(row.draws_with || 0);
-      const lossesWith = Math.max(0, gamesWith - winsWith - drawsWith);
-      const gamesEnd = Number(row.games_end || 0);
-      const winsEnd = Number(row.wins_end || 0);
-      const drawsEnd = Number(row.draws_end || 0);
-      const lossesEnd = Math.max(0, gamesEnd - winsEnd - drawsEnd);
-      switch (perkSort) {
-        case "name":
-          return row.perk_name;
-        case "count":
-          return gamesWith;
-        case "winrate":
-          return gamesWith ? winsWith / gamesWith : 0;
-        case "lossrate":
-          return gamesWith ? lossesWith / gamesWith : 0;
-        case "drawrate":
-          return gamesWith ? drawsWith / gamesWith : 0;
-        case "buyCount":
-          return gamesWith;
-        case "pickrate":
-          return games ? gamesWith / games : 0;
-        case "buyWinrate":
-          return gamesWith ? winsWith / gamesWith : 0;
-        case "buyLossrate":
-          return gamesWith ? lossesWith / gamesWith : 0;
-        case "endCount":
-          return gamesEnd;
-        case "endRate":
-          return games ? gamesEnd / games : 0;
-        case "endWinrate":
-          return gamesEnd ? winsEnd / gamesEnd : 0;
-        case "endLossrate":
-          return gamesEnd ? lossesEnd / gamesEnd : 0;
-        default:
-          return row.perk_name;
-      }
-    }, perkOrder);
-  }, [stats.perkStats, stats.totalGames, perkSort, perkOrder]);
+    return expandWithMeta(filteredPerkStats, "perk_name", perkMetaMap, perkSort).sort((a, b) =>
+      compareRows(a, b, perkSort, perkOrder, stats.totalGames, "perk_name")
+    );
+  }, [filteredPerkStats, stats.totalGames, perkSort, perkOrder, perkMetaMap, itemPackFilter]);
   const sortedToyStats = useMemo(() => {
-    return sortRows(stats.toyStats, (row) => {
-      const games = Number(stats.totalGames || 0);
-      const gamesWith = Number(row.games_with || 0);
-      const winsWith = Number(row.wins_with || 0);
-      const drawsWith = Number(row.draws_with || 0);
-      const lossesWith = Math.max(0, gamesWith - winsWith - drawsWith);
-      const gamesEnd = Number(row.games_end || 0);
-      const winsEnd = Number(row.wins_end || 0);
-      const drawsEnd = Number(row.draws_end || 0);
-      const lossesEnd = Math.max(0, gamesEnd - winsEnd - drawsEnd);
-      switch (toySort) {
-        case "name":
-          return row.toy_name;
-        case "count":
-          return gamesWith;
-        case "winrate":
-          return gamesWith ? winsWith / gamesWith : 0;
-        case "lossrate":
-          return gamesWith ? lossesWith / gamesWith : 0;
-        case "drawrate":
-          return gamesWith ? drawsWith / gamesWith : 0;
-        case "buyCount":
-          return gamesWith;
-        case "pickrate":
-          return games ? gamesWith / games : 0;
-        case "buyWinrate":
-          return gamesWith ? winsWith / gamesWith : 0;
-        case "buyLossrate":
-          return gamesWith ? lossesWith / gamesWith : 0;
-        case "endCount":
-          return gamesEnd;
-        case "endRate":
-          return games ? gamesEnd / games : 0;
-        case "endWinrate":
-          return gamesEnd ? winsEnd / gamesEnd : 0;
-        case "endLossrate":
-          return gamesEnd ? lossesEnd / gamesEnd : 0;
-        default:
-          return row.toy_name;
-      }
-    }, toyOrder);
-  }, [stats.toyStats, stats.totalGames, toySort, toyOrder]);
+    return expandWithMeta(filteredToyStats, "toy_name", toyMetaMap, toySort).sort((a, b) =>
+      compareRows(a, b, toySort, toyOrder, stats.totalGames, "toy_name")
+    );
+  }, [filteredToyStats, stats.totalGames, toySort, toyOrder, toyMetaMap, itemPackFilter]);
+  useEffect(() => {
+    setVisibleRows({
+      pack: Math.min(STATS_INITIAL_BATCH, sortedPackStats.length),
+      pet: Math.min(STATS_INITIAL_BATCH, sortedPetStats.length),
+      perk: Math.min(STATS_INITIAL_BATCH, sortedPerkStats.length),
+      toy: Math.min(STATS_INITIAL_BATCH, sortedToyStats.length),
+      matchup: Math.min(STATS_INITIAL_BATCH, sortedMatchupStats.length)
+    });
+  }, [sortedPackStats, sortedPetStats, sortedPerkStats, sortedToyStats, sortedMatchupStats]);
+  useEffect(() => {
+    const sectionConfigs = [
+      { key: "pack", collapsed: collapsed.pack, total: sortedPackStats.length, ref: packSentinelRef },
+      { key: "pet", collapsed: collapsed.pet, total: sortedPetStats.length, ref: petSentinelRef },
+      { key: "perk", collapsed: collapsed.perk, total: sortedPerkStats.length, ref: perkSentinelRef },
+      { key: "toy", collapsed: collapsed.toy, total: sortedToyStats.length, ref: toySentinelRef },
+      { key: "matchup", collapsed: collapsed.matchup, total: sortedMatchupStats.length, ref: matchupSentinelRef }
+    ];
+    const observers = [];
+    for (const section of sectionConfigs) {
+      const node = section.ref.current;
+      if (!node) continue;
+      if (section.collapsed) continue;
+      if ((visibleRows[section.key] || 0) >= section.total) continue;
+
+      const observer = new IntersectionObserver(
+        (entries) => {
+          const entry = entries[0];
+          if (!entry?.isIntersecting) return;
+          setVisibleRows((prev) => {
+            const current = prev[section.key] || 0;
+            if (current >= section.total) return prev;
+            return {
+              ...prev,
+              [section.key]: Math.min(section.total, current + STATS_BATCH_SIZE)
+            };
+          });
+        },
+        { root: null, rootMargin: "260px 0px", threshold: 0.01 }
+      );
+      observer.observe(node);
+      observers.push(observer);
+    }
+    return () => observers.forEach((observer) => observer.disconnect());
+  }, [
+    collapsed.pack,
+    collapsed.pet,
+    collapsed.perk,
+    collapsed.toy,
+    collapsed.matchup,
+    sortedPackStats.length,
+    sortedPetStats.length,
+    sortedPerkStats.length,
+    sortedToyStats.length,
+    sortedMatchupStats.length,
+    visibleRows.pack,
+    visibleRows.pet,
+    visibleRows.perk,
+    visibleRows.toy,
+    visibleRows.matchup
+  ]);
+  const visiblePackStats = useMemo(() => sortedPackStats.slice(0, visibleRows.pack), [sortedPackStats, visibleRows.pack]);
+  const visiblePetStats = useMemo(() => sortedPetStats.slice(0, visibleRows.pet), [sortedPetStats, visibleRows.pet]);
+  const visiblePerkStats = useMemo(() => sortedPerkStats.slice(0, visibleRows.perk), [sortedPerkStats, visibleRows.perk]);
+  const visibleToyStats = useMemo(() => sortedToyStats.slice(0, visibleRows.toy), [sortedToyStats, visibleRows.toy]);
+  const visibleMatchupStats = useMemo(
+    () => sortedMatchupStats.slice(0, visibleRows.matchup),
+    [sortedMatchupStats, visibleRows.matchup]
+  );
   const totalPetCount = useMemo(
-    () => sortedPetStats.reduce((sum, row) => sum + Number(row.games_with || 0), 0),
-    [sortedPetStats]
+    () => (filteredPetStats || []).reduce((sum, row) => sum + Number(row.games_with || 0), 0),
+    [filteredPetStats]
   );
   const totalPerkCount = useMemo(
-    () => sortedPerkStats.reduce((sum, row) => sum + Number(row.games_with || 0), 0),
-    [sortedPerkStats]
+    () => (filteredPerkStats || []).reduce((sum, row) => sum + Number(row.games_with || 0), 0),
+    [filteredPerkStats]
   );
   const totalToyCount = useMemo(
-    () => sortedToyStats.reduce((sum, row) => sum + Number(row.games_with || 0), 0),
-    [sortedToyStats]
+    () => (filteredToyStats || []).reduce((sum, row) => sum + Number(row.games_with || 0), 0),
+    [filteredToyStats]
   );
   const totalPackEntries = useMemo(
     () => sortedPackStats.reduce((sum, row) => sum + Number(row.games || 0), 0),
@@ -750,17 +1051,19 @@ export default function StatsPage() {
 
   return (
     <main onClick={() => setSortMenuOpen({ pet: false, perk: false, toy: false })}>
-      <div className="top-nav">
-        <Link href="/" className="nav-link">Explorer</Link>
-        <Link href="/stats" className="nav-link active">Stats</Link>
-        <Link href="/leaderboard" className="nav-link">Leaderboard</Link>
-      </div>
-
       <header className="hero">
         <div className="hero-copy">
           <h1>Stats Lab</h1>
           <p>Winrates by pack, pet buy rates, and end-board impact. Excludes Custom, Weekly, and Arena games.</p>
         </div>
+        <nav className="top-nav">
+          <Link href="/" className="nav-link">Explorer</Link>
+          <Link href="/stats" className="nav-link active">Stats</Link>
+          <Link href="/leaderboard" className="nav-link">Leaderboard</Link>
+          <Link href="/profile" className="nav-link">Profile</Link>
+          <Link href="/boards" className="nav-link">Boards</Link>
+          <LocalProfileMarker />
+        </nav>
       </header>
 
       <section className="section filters-section">
@@ -772,192 +1075,386 @@ export default function StatsPage() {
               className="ghost"
               type="button"
               onClick={() => {
+                clearAutoSearchTimeout();
                 const reset = { ...DEFAULT_STATS_FILTERS };
                 setFilters(reset);
-                setPetSort("buyWinrate");
+                setPetSort(defaultSortForScope(reset.scope));
                 setPetOrder("desc");
-                setPerkSort("buyWinrate");
+                setPerkSort(defaultSortForScope(reset.scope));
                 setPerkOrder("desc");
-                setToySort("buyWinrate");
+                setToySort(defaultSortForScope(reset.scope));
                 setToyOrder("desc");
                 loadStats(reset, {
                   uiState: {
                     viewModeValue: viewMode,
-                    petSortValue: "buyWinrate",
+                    petSortValue: defaultSortForScope(reset.scope),
                     petOrderValue: "desc",
-                    perkSortValue: "buyWinrate",
+                    perkSortValue: defaultSortForScope(reset.scope),
                     perkOrderValue: "desc",
-                    toySortValue: "buyWinrate",
+                    toySortValue: defaultSortForScope(reset.scope),
                     toyOrderValue: "desc"
                   }
                 });
               }}
             >
-              Reset
+              Clear Filters
             </button>
-            <button className="secondary" type="button" onClick={() => loadStats(filters)}>Apply</button>
+            <button
+              className="secondary"
+              type="button"
+              onClick={() => {
+                clearAutoSearchTimeout();
+                loadStats(filters);
+              }}
+            >
+              Apply Now
+            </button>
           </div>
         </div>
         {shareStatus ? <div className="status">{shareStatus}</div> : null}
-        <div className="filters">
-          <div className="field">
-            <label>Player Name</label>
-            <input
-              placeholder="Any player"
-              value={filters.player}
-              onChange={(e) => setFilters({ ...filters, player: e.target.value })}
-            />
-          </div>
-          <div className="field">
-            <label>Player ID</label>
-            <input
-              placeholder="Player UUID"
-              value={filters.playerId}
-              onChange={(e) => setFilters({ ...filters, playerId: e.target.value })}
-            />
-          </div>
-          <div className="field">
-            <label>Scope</label>
-            <select
-              value={filters.scope}
-              onChange={(e) => {
-                const nextScope = e.target.value;
-                const next = { ...filters, scope: nextScope };
-                const nextPetSort = nextScope === "battle" ? "winrate" : "buyWinrate";
-                const nextPerkSort = nextScope === "battle" ? "winrate" : "buyWinrate";
-                const nextToySort = nextScope === "battle" ? "winrate" : "buyWinrate";
-                setFilters(next);
-                setPetSort(nextPetSort);
-                setPerkSort(nextPerkSort);
-                setToySort(nextToySort);
-                setPetOrder("desc");
-                setPerkOrder("desc");
-                setToyOrder("desc");
-                loadStats(next, {
-                  uiState: {
-                    viewModeValue: viewMode,
-                    petSortValue: nextPetSort,
-                    petOrderValue: "desc",
-                    perkSortValue: nextPerkSort,
-                    perkOrderValue: "desc",
-                    toySortValue: nextToySort,
-                    toyOrderValue: "desc"
-                  }
-                });
-              }}
-            >
-              <option value="game">Per Game</option>
-              <option value="battle">Per Battle</option>
-            </select>
-          </div>
-          <div className="field">
-            <label>Player Pack</label>
-            <select value={filters.pack} onChange={(e) => setFilters({ ...filters, pack: e.target.value })}>
-              <option value="">Any</option>
-              {packOptions.map((pack) => (
-                <option key={pack.id} value={pack.name}>{pack.name}</option>
-              ))}
-            </select>
-          </div>
-          <div className="field">
-            <label>Opponent Pack</label>
-            <select value={filters.opponentPack} onChange={(e) => setFilters({ ...filters, opponentPack: e.target.value })}>
-              <option value="">Any</option>
-              {packOptions.map((pack) => (
-                <option key={pack.id} value={pack.name}>{pack.name}</option>
-              ))}
-            </select>
-          </div>
-          {filters.scope === "battle" && (
-            <>
-              <div className="field">
-                <label>Min Turn</label>
-                <input
-                  type="number"
-                  min="1"
-                  placeholder="1"
-                  value={filters.minTurn}
-                  onChange={(e) => setFilters({ ...filters, minTurn: e.target.value })}
-                />
-              </div>
-              <div className="field">
-                <label>Max Turn</label>
-                <input
-                  type="number"
-                  min="1"
-                  placeholder="15"
-                  value={filters.maxTurn}
-                  onChange={(e) => setFilters({ ...filters, maxTurn: e.target.value })}
-                />
-              </div>
-            </>
-          )}
-          <div className="field">
-            <label>Pet Level</label>
-            <select value={filters.petLevel} onChange={(e) => setFilters({ ...filters, petLevel: e.target.value })}>
-              <option value="">Any</option>
-              <option value="1">1</option>
-              <option value="2">2</option>
-              <option value="3">3</option>
-            </select>
-          </div>
+        <div className="toggles">
+          <button
+            type="button"
+            className={visibleFilterSections.general ? "toggle active" : "toggle"}
+            onClick={() => toggleFilterSection("general")}
+          >
+            General
+          </button>
+          <button
+            type="button"
+            className={visibleFilterSections.matchup ? "toggle active" : "toggle"}
+            onClick={() => toggleFilterSection("matchup")}
+          >
+            Pack Matchup
+          </button>
+          <button
+            type="button"
+            className={visibleFilterSections.thresholds ? "toggle active" : "toggle"}
+            onClick={() => toggleFilterSection("thresholds")}
+          >
+            Thresholds
+          </button>
+          <button
+            type="button"
+            className={visibleFilterSections.items ? "toggle with-icon active" : "toggle with-icon"}
+            onClick={() => toggleFilterSection("items")}
+          >
+            <img className="toggle-icon" src={petFilterSprite} alt="" />
+            Board + Turns
+          </button>
+          <button
+            type="button"
+            className={visibleFilterSections.advanced ? "toggle subtle active" : "toggle subtle"}
+            onClick={() => toggleFilterSection("advanced")}
+          >
+            Advanced
+          </button>
         </div>
-        <details className="advanced-panel">
-          <summary>Advanced</summary>
-          <p className="advanced-note">Filter by board presence for each side. Matches any battle in a game.</p>
-          <div className="filters advanced-filters">
-            <IconMultiSelect
-              label="Your Side Pet"
-              options={petOptions}
-              selected={filters.allyPet}
-              onChange={(value) => setFilters({ ...filters, allyPet: value })}
-              placeholder="Search pets and add"
-            />
-            <IconMultiSelect
-              label="Opponent Pet"
-              options={petOptions}
-              selected={filters.opponentPet}
-              onChange={(value) => setFilters({ ...filters, opponentPet: value })}
-              placeholder="Search pets and add"
-            />
-            <IconMultiSelect
-              label="Your Side Perk"
-              options={perkOptions}
-              selected={filters.allyPerk}
-              onChange={(value) => setFilters({ ...filters, allyPerk: value })}
-              placeholder="Search perks and add"
-            />
-            <IconMultiSelect
-              label="Opponent Perk"
-              options={perkOptions}
-              selected={filters.opponentPerk}
-              onChange={(value) => setFilters({ ...filters, opponentPerk: value })}
-              placeholder="Search perks and add"
-            />
-            <IconMultiSelect
-              label="Your Side Toy"
-              options={toyOptions}
-              selected={filters.allyToy}
-              onChange={(value) => setFilters({ ...filters, allyToy: value })}
-              placeholder="Search toys and add"
-            />
-            <IconMultiSelect
-              label="Opponent Toy"
-              options={toyOptions}
-              selected={filters.opponentToy}
-              onChange={(value) => setFilters({ ...filters, opponentToy: value })}
-              placeholder="Search toys and add"
-            />
-            <div className="field">
-              <label>Tags (comma)</label>
-              <input
-                placeholder="tournament, week1"
-                value={filters.tags}
-                onChange={(e) => setFilters({ ...filters, tags: e.target.value })}
-              />
+        <div className="filter-categories">
+          {visibleFilterSections.general && (
+            <div className="filter-category">
+              <div className="filter-category-head">
+                <h3>General</h3>
+                <p>Core scope and player identity filters.</p>
+              </div>
+              <div className="filters">
+                <div className="field">
+                  <label>Player Name</label>
+                  <input
+                    placeholder="Any player"
+                    value={filters.player}
+                    onChange={(e) => setFilters({ ...filters, player: e.target.value })}
+                  />
+                </div>
+                <div className="field">
+                  <label>Player ID</label>
+                  <input
+                    placeholder="Player UUID"
+                    value={filters.playerId}
+                    onChange={(e) => setFilters({ ...filters, playerId: e.target.value })}
+                  />
+                </div>
+                <div className="field">
+                  <label>Version</label>
+                  <select
+                    value={filters.version}
+                    onChange={(e) => setFilters({ ...filters, version: e.target.value })}
+                  >
+                    <option value="current">
+                      Current
+                      {meta.currentVersion ? ` (${meta.currentVersion})` : ""}
+                    </option>
+                    <option value="all">All Versions</option>
+                    {(meta.versions || []).map((version) => (
+                      <option key={version} value={version}>
+                        {version}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Scope</label>
+                  <select
+                    value={filters.scope}
+                    onChange={(e) => {
+                      const nextScope = e.target.value;
+                      const next = { ...filters, scope: nextScope };
+                      const nextPetSort = defaultSortForScope(nextScope);
+                      const nextPerkSort = defaultSortForScope(nextScope);
+                      const nextToySort = defaultSortForScope(nextScope);
+                      setFilters(next);
+                      setPetSort(nextPetSort);
+                      setPerkSort(nextPerkSort);
+                      setToySort(nextToySort);
+                      setPetOrder("desc");
+                      setPerkOrder("desc");
+                      setToyOrder("desc");
+                    }}
+                  >
+                    <option value="game">Per Game</option>
+                    <option value="battle">Per Battle</option>
+                  </select>
+                </div>
+              </div>
             </div>
-          </div>
-        </details>
+          )}
+
+          {visibleFilterSections.matchup && (
+            <div className="filter-category">
+              <div className="filter-category-head">
+                <h3>Pack Matchup</h3>
+                <p>Restrict by pack combinations and mirror handling.</p>
+              </div>
+              <div className="filters">
+                <div className="field">
+                  <label>Player Pack</label>
+                  <select value={filters.pack} onChange={(e) => setFilters({ ...filters, pack: e.target.value })}>
+                    <option value="">Any</option>
+                    {packOptions.map((pack) => (
+                      <option key={pack.id} value={pack.name}>{pack.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Opponent Pack</label>
+                  <select value={filters.opponentPack} onChange={(e) => setFilters({ ...filters, opponentPack: e.target.value })}>
+                    <option value="">Any</option>
+                    {packOptions.map((pack) => (
+                      <option key={pack.id} value={pack.name}>{pack.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Winning Pack</label>
+                  <select value={filters.winningPack} onChange={(e) => setFilters({ ...filters, winningPack: e.target.value })}>
+                    <option value="">Any</option>
+                    {packOptions.map((pack) => (
+                      <option key={`stats-win-${pack.id}`} value={pack.name}>{pack.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Losing Pack</label>
+                  <select value={filters.losingPack} onChange={(e) => setFilters({ ...filters, losingPack: e.target.value })}>
+                    <option value="">Any</option>
+                    {packOptions.map((pack) => (
+                      <option key={`stats-lose-${pack.id}`} value={pack.name}>{pack.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Exclude Pack</label>
+                  <select value={filters.excludePack} onChange={(e) => setFilters({ ...filters, excludePack: e.target.value })}>
+                    <option value="">None</option>
+                    {packOptions.map((pack) => (
+                      <option key={`exclude-${pack.id}`} value={pack.name}>{pack.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Exclude Mirrors</label>
+                  <select
+                    value={filters.excludeMirrors ? "yes" : "no"}
+                    onChange={(e) => setFilters({ ...filters, excludeMirrors: e.target.value === "yes" })}
+                  >
+                    <option value="no">No</option>
+                    <option value="yes">Yes</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {visibleFilterSections.thresholds && (
+            <div className="filter-category">
+              <div className="filter-category-head">
+                <h3>Thresholds</h3>
+                <p>Sample-size and rank constraints.</p>
+              </div>
+              <div className="filters">
+                <div className="field">
+                  <label>Min Sample Size</label>
+                  <input
+                    type="number"
+                    min="0"
+                    placeholder="10"
+                    value={filters.minSample}
+                    onChange={(e) => setFilters({ ...filters, minSample: e.target.value })}
+                  />
+                </div>
+                {filters.scope === "game" && (
+                  <div className="field">
+                    <label>Min End On #</label>
+                    <input
+                      type="number"
+                      min="0"
+                      placeholder="Any"
+                      value={filters.minEndOn}
+                      onChange={(e) => setFilters({ ...filters, minEndOn: e.target.value })}
+                    />
+                  </div>
+                )}
+                <div className="field">
+                  <label>Min Elo</label>
+                  <input
+                    type="number"
+                    min="0"
+                    placeholder="Any"
+                    value={filters.minElo}
+                    onChange={(e) => setFilters({ ...filters, minElo: e.target.value })}
+                  />
+                </div>
+                <div className="field">
+                  <label>Max Elo</label>
+                  <input
+                    type="number"
+                    min="0"
+                    placeholder="Any"
+                    value={filters.maxElo}
+                    onChange={(e) => setFilters({ ...filters, maxElo: e.target.value })}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {visibleFilterSections.items && (
+            <div className="filter-category">
+              <div className="filter-category-head">
+                <h3>Board + Turns</h3>
+                <p>Board grouping, pet level, and optional battle turn window.</p>
+              </div>
+              <div className="filters">
+                <div className="field">
+                  <label>Board Pack Group</label>
+                  <select value={filters.itemPack} onChange={(e) => setFilters({ ...filters, itemPack: e.target.value })}>
+                    <option value="">All Packs</option>
+                    {packOptions.map((pack) => (
+                      <option key={`item-pack-${pack.id}`} value={pack.name}>{pack.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Pet Level</label>
+                  <select value={filters.petLevel} onChange={(e) => setFilters({ ...filters, petLevel: e.target.value })}>
+                    <option value="">Any</option>
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                  </select>
+                </div>
+                <div className="field">
+                  <label>
+                    <span className="multi-label-with-icon">
+                      <img src={turnFilterSprite} alt="" className="multi-label-icon" />
+                      <span>Min Turn</span>
+                    </span>
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="1"
+                    value={filters.minTurn}
+                    onChange={(e) => setFilters({ ...filters, minTurn: e.target.value })}
+                  />
+                </div>
+                <div className="field">
+                  <label>
+                    <span className="multi-label-with-icon">
+                      <img src={turnFilterSprite} alt="" className="multi-label-icon" />
+                      <span>Max Turn</span>
+                    </span>
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="15"
+                    value={filters.maxTurn}
+                    onChange={(e) => setFilters({ ...filters, maxTurn: e.target.value })}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+        {visibleFilterSections.advanced && (
+          <details className="advanced-panel">
+            <summary>Advanced</summary>
+            <p className="advanced-note">Filter by board presence for each side. Matches any battle in a game.</p>
+            <div className="filters advanced-filters">
+              <IconMultiSelect
+                label="Your Side Pet"
+                options={petOptions}
+                selected={filters.allyPet}
+                onChange={(value) => setFilters({ ...filters, allyPet: value })}
+                placeholder="Search pets and add"
+              />
+              <IconMultiSelect
+                label="Opponent Pet"
+                options={petOptions}
+                selected={filters.opponentPet}
+                onChange={(value) => setFilters({ ...filters, opponentPet: value })}
+                placeholder="Search pets and add"
+              />
+              <IconMultiSelect
+                label="Your Side Perk"
+                options={perkOptions}
+                selected={filters.allyPerk}
+                onChange={(value) => setFilters({ ...filters, allyPerk: value })}
+                placeholder="Search perks and add"
+              />
+              <IconMultiSelect
+                label="Opponent Perk"
+                options={perkOptions}
+                selected={filters.opponentPerk}
+                onChange={(value) => setFilters({ ...filters, opponentPerk: value })}
+                placeholder="Search perks and add"
+              />
+              <IconMultiSelect
+                label="Your Side Toy"
+                options={toyOptions}
+                selected={filters.allyToy}
+                onChange={(value) => setFilters({ ...filters, allyToy: value })}
+                placeholder="Search toys and add"
+              />
+              <IconMultiSelect
+                label="Opponent Toy"
+                options={toyOptions}
+                selected={filters.opponentToy}
+                onChange={(value) => setFilters({ ...filters, opponentToy: value })}
+                placeholder="Search toys and add"
+              />
+              <div className="field">
+                <label>Tags (comma)</label>
+                <input
+                  placeholder="tournament, week1"
+                  value={filters.tags}
+                  onChange={(e) => setFilters({ ...filters, tags: e.target.value })}
+                />
+              </div>
+            </div>
+          </details>
+        )}
       </section>
 
 
@@ -1024,13 +1521,27 @@ export default function StatsPage() {
       <section className="section">
         <div className="results-header">
           <h2>Pack Stats</h2>
+          <div className="results-actions">
+            <button type="button" className="ghost" onClick={() => toggleCollapsed("pack")}>
+              {collapsed.pack ? "Expand" : "Collapse"}
+            </button>
+          </div>
         </div>
+        {!collapsed.pack && (
+        <>
         <div className={statsCardsClass}>
-          {sortedPackStats.map((row) => {
+          {visiblePackStats.map((row) => {
             const games = Number(row.games || 0);
             const wins = Number(row.wins || 0);
             const draws = Number(row.draws || 0);
-            const losses = Math.max(0, games - wins - draws);
+            const avgGameLength = Number(row.avg_game_length || 0);
+            const rateGames = Number(row.rate_games ?? games);
+            const rateWins = Number(row.rate_wins ?? wins);
+            const rateDraws = Number(row.rate_draws ?? draws);
+            const rateLosses = Math.max(0, rateGames - rateWins - rateDraws);
+            const avgRankValue = Number(row.avg_rank);
+            const avgRankLabel =
+              Number.isFinite(avgRankValue) && avgRankValue > 0 ? avgRankValue.toFixed(1) : "-";
             return (
               <div className="stats-card" key={row.pack}>
                 <div className="stats-card-head">
@@ -1043,20 +1554,30 @@ export default function StatsPage() {
                   <span>{filters.scope === "battle" ? "Rounds" : "Games"}: {games}</span>
                 </div>
                 <div className="stats-card-metrics">
-                  <div>Pickrate: {formatPct(totalPackEntries ? games / totalPackEntries : 0)}</div>
-                  <div>Winrate: {formatPct(games ? wins / games : 0)}</div>
-                  <div>Lossrate: {formatPct(games ? losses / games : 0)}</div>
+                  <div>Pack Share: {formatPct(totalPackEntries ? games / totalPackEntries : 0)}</div>
+                  <div>Avg Game Length: {formatTurns(avgGameLength)} turns</div>
+                  <div className="rate-win">Winrate (No Mirrors): {formatPct(rateGames ? rateWins / rateGames : 0)}</div>
+                  <div className="rate-loss">Lossrate (No Mirrors): {formatPct(rateGames ? rateLosses / rateGames : 0)}</div>
+                  <div>Avg Rank (non-private): {avgRankLabel}</div>
                   {filters.scope === "battle" ? (
-                    <div>Drawrate: {formatPct(games ? draws / games : 0)}</div>
+                    <div>Drawrate (No Mirrors): {formatPct(rateGames ? rateDraws / rateGames : 0)}</div>
                   ) : null}
                 </div>
               </div>
             );
           })}
-          {stats.packStats.length === 0 && !loading && (
+          {sortedPackStats.length === 0 && !loading && (
             <div className="stats-card empty">No pack stats yet.</div>
           )}
         </div>
+        {sortedPackStats.length > 0 && (
+          <div className="infinite-footer">
+            <div className="page-info">{visiblePackStats.length} / {sortedPackStats.length}</div>
+            <div ref={packSentinelRef} className="list-sentinel" />
+          </div>
+        )}
+        </>
+        )}
       </section>
 
       <section className="section">
@@ -1064,13 +1585,18 @@ export default function StatsPage() {
           <h2>Pet Stats</h2>
           <div className="section-inline-filter">
             <IconMultiSelect
-              label=""
+              label={(
+                <span className="multi-label-with-icon">
+                  <img src={petFilterSprite} alt="" className="multi-label-icon" />
+                  <span>Pet Search</span>
+                </span>
+              )}
               options={petOptions}
               selected={filters.pet}
               onChange={(value) => {
                 const next = { ...filters, pet: value };
                 setFilters(next);
-                loadStats(next);
+                syncStatsUrl(next);
               }}
               placeholder="Search pets..."
             />
@@ -1091,7 +1617,16 @@ export default function StatsPage() {
               <div className="sort-panel" onClick={(e) => e.stopPropagation()}>
                 <div className="field">
                   <label>Sort</label>
-                  <select value={petSort} onChange={(e) => setPetSort(e.target.value)}>
+                  <select
+                    value={petSort}
+                    onChange={(e) => {
+                      const nextSort = e.target.value;
+                      setPetSort(nextSort);
+                      if (nextSort === "pack") {
+                        setPetOrder("asc");
+                      }
+                    }}
+                  >
                     {itemSortOptions.map((opt) => (
                       <option key={opt.value} value={opt.value}>{opt.label}</option>
                     ))}
@@ -1100,16 +1635,23 @@ export default function StatsPage() {
                 <div className="field">
                   <label>Order</label>
                   <select value={petOrder} onChange={(e) => setPetOrder(e.target.value)}>
-                    <option value="asc">Asc</option>
-                    <option value="desc">Desc</option>
+                    <option value="asc">Ascending</option>
+                    <option value="desc">Descending</option>
                   </select>
                 </div>
               </div>
             )}
           </div>
+          <div className="results-actions">
+            <button type="button" className="ghost" onClick={() => toggleCollapsed("pet")}>
+              {collapsed.pet ? "Expand" : "Collapse"}
+            </button>
+          </div>
         </div>
+        {!collapsed.pet && (
+        <>
         <div className={statsCardsClass}>
-          {sortedPetStats.map((row) => {
+          {visiblePetStats.map((row) => {
             const games = Number(stats.totalGames || 0);
             const gamesWith = Number(row.games_with || 0);
             const winsWith = Number(row.wins_with || 0);
@@ -1120,19 +1662,23 @@ export default function StatsPage() {
             const lossesWith = Math.max(0, gamesWith - winsWith - drawsWith);
             const lossesEnd = Math.max(0, gamesEnd - winsEnd - drawsEnd);
             return (
-              <div className="stats-card" key={row.pet_name}>
+              <div className="stats-card" key={`${row.pet_name}-${row._pack || "all"}`}>
                 <div className="stats-card-head">
                   {petSprite(row.pet_name) ? (
                     <img src={petSprite(row.pet_name)} alt="" />
                   ) : null}
                   <h4>{row.pet_name}</h4>
                 </div>
+                <div className="stats-card-meta">
+                  <span>Tier: {row._tier ?? "?"}</span>
+                  <span>Pack: {row._pack || "Unassigned"}</span>
+                </div>
                 {filters.scope === "battle" ? (
                   <>
                     <div className="stats-card-meta">Rounds: {gamesWith}</div>
                     <div className="stats-card-metrics">
-                      <div>Winrate: {formatPct(gamesWith ? winsWith / gamesWith : 0)}</div>
-                      <div>Lossrate: {formatPct(gamesWith ? lossesWith / gamesWith : 0)}</div>
+                      <div className="rate-win">Winrate: {formatPct(gamesWith ? winsWith / gamesWith : 0)}</div>
+                      <div className="rate-loss">Lossrate: {formatPct(gamesWith ? lossesWith / gamesWith : 0)}</div>
                       <div>Drawrate: {formatPct(gamesWith ? drawsWith / gamesWith : 0)}</div>
                     </div>
                   </>
@@ -1140,23 +1686,31 @@ export default function StatsPage() {
                   <>
                     <div className="stats-card-meta">Buy: {gamesWith}</div>
                     <div className="stats-card-metrics">
-                      <div>Pickrate: {formatPct(games ? gamesWith / games : 0)}</div>
-                      <div>Winrate (Buy): {formatPct(gamesWith ? winsWith / gamesWith : 0)}</div>
-                      <div>Lossrate (Buy): {formatPct(gamesWith ? lossesWith / gamesWith : 0)}</div>
+                      <div>{appearanceLabel}: {formatPct(games ? gamesWith / games : 0)}</div>
+                      <div className="rate-win">Winrate (Buy): {formatPct(gamesWith ? winsWith / gamesWith : 0)}</div>
+                      <div className="rate-loss">Lossrate (Buy): {formatPct(gamesWith ? lossesWith / gamesWith : 0)}</div>
                       <div>End: {gamesEnd}</div>
                       <div>End Rate: {formatPct(games ? gamesEnd / games : 0)}</div>
-                      <div>Winrate (End): {formatPct(gamesEnd ? winsEnd / gamesEnd : 0)}</div>
-                      <div>Lossrate (End): {formatPct(gamesEnd ? lossesEnd / gamesEnd : 0)}</div>
+                      <div className="rate-win">Winrate (End): {formatPct(gamesEnd ? winsEnd / gamesEnd : 0)}</div>
+                      <div className="rate-loss">Lossrate (End): {formatPct(gamesEnd ? lossesEnd / gamesEnd : 0)}</div>
                     </div>
                   </>
                 )}
               </div>
             );
           })}
-          {stats.petStats.length === 0 && !loading && (
+          {sortedPetStats.length === 0 && !loading && (
             <div className="stats-card empty">No pet stats yet.</div>
           )}
         </div>
+        {sortedPetStats.length > 0 && (
+          <div className="infinite-footer">
+            <div className="page-info">{visiblePetStats.length} / {sortedPetStats.length}</div>
+            <div ref={petSentinelRef} className="list-sentinel" />
+          </div>
+        )}
+        </>
+        )}
       </section>
 
       <section className="section">
@@ -1164,13 +1718,18 @@ export default function StatsPage() {
           <h2>Perk Stats</h2>
           <div className="section-inline-filter">
             <IconMultiSelect
-              label="Perk Search"
+              label={(
+                <span className="multi-label-with-icon">
+                  <img src={perkFilterSprite} alt="" className="multi-label-icon" />
+                  <span>Perk Search</span>
+                </span>
+              )}
               options={perkOptions}
               selected={filters.perk}
               onChange={(value) => {
                 const next = { ...filters, perk: value };
                 setFilters(next);
-                loadStats(next);
+                syncStatsUrl(next);
               }}
               placeholder="Search perks and add"
             />
@@ -1191,7 +1750,16 @@ export default function StatsPage() {
               <div className="sort-panel" onClick={(e) => e.stopPropagation()}>
                 <div className="field">
                   <label>Sort</label>
-                  <select value={perkSort} onChange={(e) => setPerkSort(e.target.value)}>
+                  <select
+                    value={perkSort}
+                    onChange={(e) => {
+                      const nextSort = e.target.value;
+                      setPerkSort(nextSort);
+                      if (nextSort === "pack") {
+                        setPerkOrder("asc");
+                      }
+                    }}
+                  >
                     {itemSortOptions.map((opt) => (
                       <option key={opt.value} value={opt.value}>{opt.label}</option>
                     ))}
@@ -1200,16 +1768,23 @@ export default function StatsPage() {
                 <div className="field">
                   <label>Order</label>
                   <select value={perkOrder} onChange={(e) => setPerkOrder(e.target.value)}>
-                    <option value="asc">Asc</option>
-                    <option value="desc">Desc</option>
+                    <option value="asc">Ascending</option>
+                    <option value="desc">Descending</option>
                   </select>
                 </div>
               </div>
             )}
           </div>
+          <div className="results-actions">
+            <button type="button" className="ghost" onClick={() => toggleCollapsed("perk")}>
+              {collapsed.perk ? "Expand" : "Collapse"}
+            </button>
+          </div>
         </div>
+        {!collapsed.perk && (
+        <>
         <div className={statsCardsClass}>
-          {sortedPerkStats.map((row) => {
+          {visiblePerkStats.map((row) => {
             const games = Number(stats.totalGames || 0);
             const gamesWith = Number(row.games_with || 0);
             const winsWith = Number(row.wins_with || 0);
@@ -1220,19 +1795,23 @@ export default function StatsPage() {
             const lossesWith = Math.max(0, gamesWith - winsWith - drawsWith);
             const lossesEnd = Math.max(0, gamesEnd - winsEnd - drawsEnd);
             return (
-              <div className="stats-card" key={`perk-${row.perk_name}`}>
+              <div className="stats-card" key={`perk-${row.perk_name}-${row._pack || "all"}`}>
                 <div className="stats-card-head">
                   {perkSprite(row.perk_name) ? (
                     <img src={perkSprite(row.perk_name)} alt="" />
                   ) : null}
                   <h4>{row.perk_name}</h4>
                 </div>
+                <div className="stats-card-meta">
+                  <span>Tier: {row._tier ?? "?"}</span>
+                  <span>Pack: {row._pack || "Unassigned"}</span>
+                </div>
                 {filters.scope === "battle" ? (
                   <>
                     <div className="stats-card-meta">Rounds: {gamesWith}</div>
                     <div className="stats-card-metrics">
-                      <div>Winrate: {formatPct(gamesWith ? winsWith / gamesWith : 0)}</div>
-                      <div>Lossrate: {formatPct(gamesWith ? lossesWith / gamesWith : 0)}</div>
+                      <div className="rate-win">Winrate: {formatPct(gamesWith ? winsWith / gamesWith : 0)}</div>
+                      <div className="rate-loss">Lossrate: {formatPct(gamesWith ? lossesWith / gamesWith : 0)}</div>
                       <div>Drawrate: {formatPct(gamesWith ? drawsWith / gamesWith : 0)}</div>
                     </div>
                   </>
@@ -1240,23 +1819,31 @@ export default function StatsPage() {
                   <>
                     <div className="stats-card-meta">Buy: {gamesWith}</div>
                     <div className="stats-card-metrics">
-                      <div>Pickrate: {formatPct(games ? gamesWith / games : 0)}</div>
-                      <div>Winrate (Buy): {formatPct(gamesWith ? winsWith / gamesWith : 0)}</div>
-                      <div>Lossrate (Buy): {formatPct(gamesWith ? lossesWith / gamesWith : 0)}</div>
+                      <div>{appearanceLabel}: {formatPct(games ? gamesWith / games : 0)}</div>
+                      <div className="rate-win">Winrate (Buy): {formatPct(gamesWith ? winsWith / gamesWith : 0)}</div>
+                      <div className="rate-loss">Lossrate (Buy): {formatPct(gamesWith ? lossesWith / gamesWith : 0)}</div>
                       <div>End: {gamesEnd}</div>
                       <div>End Rate: {formatPct(games ? gamesEnd / games : 0)}</div>
-                      <div>Winrate (End): {formatPct(gamesEnd ? winsEnd / gamesEnd : 0)}</div>
-                      <div>Lossrate (End): {formatPct(gamesEnd ? lossesEnd / gamesEnd : 0)}</div>
+                      <div className="rate-win">Winrate (End): {formatPct(gamesEnd ? winsEnd / gamesEnd : 0)}</div>
+                      <div className="rate-loss">Lossrate (End): {formatPct(gamesEnd ? lossesEnd / gamesEnd : 0)}</div>
                     </div>
                   </>
                 )}
               </div>
             );
           })}
-          {stats.perkStats.length === 0 && !loading && (
+          {sortedPerkStats.length === 0 && !loading && (
             <div className="stats-card empty">No perk stats yet.</div>
           )}
         </div>
+        {sortedPerkStats.length > 0 && (
+          <div className="infinite-footer">
+            <div className="page-info">{visiblePerkStats.length} / {sortedPerkStats.length}</div>
+            <div ref={perkSentinelRef} className="list-sentinel" />
+          </div>
+        )}
+        </>
+        )}
       </section>
 
       <section className="section">
@@ -1264,13 +1851,18 @@ export default function StatsPage() {
           <h2>Toy Stats</h2>
           <div className="section-inline-filter">
             <IconMultiSelect
-              label="Toy Search"
+              label={(
+                <span className="multi-label-with-icon">
+                  <img src={toyFilterSprite} alt="" className="multi-label-icon" />
+                  <span>Toy Search</span>
+                </span>
+              )}
               options={toyOptions}
               selected={filters.toy}
               onChange={(value) => {
                 const next = { ...filters, toy: value };
                 setFilters(next);
-                loadStats(next);
+                syncStatsUrl(next);
               }}
               placeholder="Search toys and add"
             />
@@ -1291,7 +1883,16 @@ export default function StatsPage() {
               <div className="sort-panel" onClick={(e) => e.stopPropagation()}>
                 <div className="field">
                   <label>Sort</label>
-                  <select value={toySort} onChange={(e) => setToySort(e.target.value)}>
+                  <select
+                    value={toySort}
+                    onChange={(e) => {
+                      const nextSort = e.target.value;
+                      setToySort(nextSort);
+                      if (nextSort === "pack") {
+                        setToyOrder("asc");
+                      }
+                    }}
+                  >
                     {itemSortOptions.map((opt) => (
                       <option key={opt.value} value={opt.value}>{opt.label}</option>
                     ))}
@@ -1300,16 +1901,23 @@ export default function StatsPage() {
                 <div className="field">
                   <label>Order</label>
                   <select value={toyOrder} onChange={(e) => setToyOrder(e.target.value)}>
-                    <option value="asc">Asc</option>
-                    <option value="desc">Desc</option>
+                    <option value="asc">Ascending</option>
+                    <option value="desc">Descending</option>
                   </select>
                 </div>
               </div>
             )}
           </div>
+          <div className="results-actions">
+            <button type="button" className="ghost" onClick={() => toggleCollapsed("toy")}>
+              {collapsed.toy ? "Expand" : "Collapse"}
+            </button>
+          </div>
         </div>
+        {!collapsed.toy && (
+        <>
         <div className={statsCardsClass}>
-          {sortedToyStats.map((row) => {
+          {visibleToyStats.map((row) => {
             const games = Number(stats.totalGames || 0);
             const gamesWith = Number(row.games_with || 0);
             const winsWith = Number(row.wins_with || 0);
@@ -1320,19 +1928,23 @@ export default function StatsPage() {
             const lossesWith = Math.max(0, gamesWith - winsWith - drawsWith);
             const lossesEnd = Math.max(0, gamesEnd - winsEnd - drawsEnd);
             return (
-              <div className="stats-card" key={`toy-${row.toy_name}`}>
+              <div className="stats-card" key={`toy-${row.toy_name}-${row._pack || "all"}`}>
                 <div className="stats-card-head">
                   {toySprite(row.toy_name) ? (
                     <img src={toySprite(row.toy_name)} alt="" />
                   ) : null}
                   <h4>{row.toy_name}</h4>
                 </div>
+                <div className="stats-card-meta">
+                  <span>Tier: {row._tier ?? "?"}</span>
+                  <span>Pack: {row._pack || "Unassigned"}</span>
+                </div>
                 {filters.scope === "battle" ? (
                   <>
                     <div className="stats-card-meta">Rounds: {gamesWith}</div>
                     <div className="stats-card-metrics">
-                      <div>Winrate: {formatPct(gamesWith ? winsWith / gamesWith : 0)}</div>
-                      <div>Lossrate: {formatPct(gamesWith ? lossesWith / gamesWith : 0)}</div>
+                      <div className="rate-win">Winrate: {formatPct(gamesWith ? winsWith / gamesWith : 0)}</div>
+                      <div className="rate-loss">Lossrate: {formatPct(gamesWith ? lossesWith / gamesWith : 0)}</div>
                       <div>Drawrate: {formatPct(gamesWith ? drawsWith / gamesWith : 0)}</div>
                     </div>
                   </>
@@ -1340,23 +1952,186 @@ export default function StatsPage() {
                   <>
                     <div className="stats-card-meta">Buy: {gamesWith}</div>
                     <div className="stats-card-metrics">
-                      <div>Pickrate: {formatPct(games ? gamesWith / games : 0)}</div>
-                      <div>Winrate (Buy): {formatPct(gamesWith ? winsWith / gamesWith : 0)}</div>
-                      <div>Lossrate (Buy): {formatPct(gamesWith ? lossesWith / gamesWith : 0)}</div>
+                      <div>{appearanceLabel}: {formatPct(games ? gamesWith / games : 0)}</div>
+                      <div className="rate-win">Winrate (Buy): {formatPct(gamesWith ? winsWith / gamesWith : 0)}</div>
+                      <div className="rate-loss">Lossrate (Buy): {formatPct(gamesWith ? lossesWith / gamesWith : 0)}</div>
                       <div>End: {gamesEnd}</div>
                       <div>End Rate: {formatPct(games ? gamesEnd / games : 0)}</div>
-                      <div>Winrate (End): {formatPct(gamesEnd ? winsEnd / gamesEnd : 0)}</div>
-                      <div>Lossrate (End): {formatPct(gamesEnd ? lossesEnd / gamesEnd : 0)}</div>
+                      <div className="rate-win">Winrate (End): {formatPct(gamesEnd ? winsEnd / gamesEnd : 0)}</div>
+                      <div className="rate-loss">Lossrate (End): {formatPct(gamesEnd ? lossesEnd / gamesEnd : 0)}</div>
                     </div>
                   </>
                 )}
               </div>
             );
           })}
-          {stats.toyStats.length === 0 && !loading && (
+          {sortedToyStats.length === 0 && !loading && (
             <div className="stats-card empty">No toy stats yet.</div>
           )}
         </div>
+        {sortedToyStats.length > 0 && (
+          <div className="infinite-footer">
+            <div className="page-info">{visibleToyStats.length} / {sortedToyStats.length}</div>
+            <div ref={toySentinelRef} className="list-sentinel" />
+          </div>
+        )}
+        </>
+        )}
+      </section>
+
+      <section className="section">
+        <div className="results-header">
+          <h2>Matchup Stats</h2>
+          <div className="results-actions">
+            <button type="button" className="ghost" onClick={() => toggleCollapsed("matchup")}>
+              {collapsed.matchup ? "Expand" : "Collapse"}
+            </button>
+          </div>
+        </div>
+        {!collapsed.matchup && (
+        <>
+        <div className={statsCardsClass}>
+          {visibleMatchupStats.map((row) => {
+            const games = Number(row.games || 0);
+            const wins = Number(row.wins || 0);
+            const draws = Number(row.draws || 0);
+            const avgGameLength = Number(row.avg_game_length || 0);
+            const rateGames = Number(row.rate_games ?? games);
+            const rateWins = Number(row.rate_wins ?? wins);
+            const rateDraws = Number(row.rate_draws ?? draws);
+            const hasNoMirrorSample = rateGames > 0;
+            const effectiveGames = hasNoMirrorSample ? rateGames : games;
+            const effectiveWins = hasNoMirrorSample ? rateWins : wins;
+            const effectiveDraws = hasNoMirrorSample ? rateDraws : draws;
+            const effectiveLosses = Math.max(0, effectiveGames - effectiveWins - effectiveDraws);
+            const rateLabel = hasNoMirrorSample ? " (No Mirrors)" : "";
+            const matchupKey = `${String(row.pack || "")}::${String(row.opponent_pack || "")}`;
+            const matchupTurnId = `matchup-turn-${matchupKey.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+            const perTurnRows = Array.isArray(row.per_turn) ? row.per_turn : [];
+            const turnsExpanded = Boolean(expandedMatchupRows[matchupKey]);
+            const preferredPack = String(filters.pack || filters.opponentPack || "").trim().toLowerCase();
+            const packLeft = String(row.pack || "");
+            const packRight = String(row.opponent_pack || "");
+            const defaultFlipped = Boolean(
+              preferredPack &&
+              packLeft.toLowerCase() !== preferredPack &&
+              packRight.toLowerCase() === preferredPack
+            );
+            const hasPerspectiveOverride = Object.prototype.hasOwnProperty.call(matchupPerspectiveRows, matchupKey);
+            const isPerspectiveFlipped = hasPerspectiveOverride
+              ? Boolean(matchupPerspectiveRows[matchupKey])
+              : defaultFlipped;
+            const perspectivePack = isPerspectiveFlipped ? packRight : packLeft;
+            const perspectiveOpponentPack = isPerspectiveFlipped ? packLeft : packRight;
+            const perspectiveWins = isPerspectiveFlipped ? effectiveLosses : effectiveWins;
+            const perspectiveLosses = isPerspectiveFlipped ? effectiveWins : effectiveLosses;
+            return (
+              <div className="stats-card" key={`${row.pack}-${row.opponent_pack}`}>
+                <div className="stats-card-head">
+                  <PackMatchupInline
+                    pack={perspectivePack}
+                    opponentPack={perspectiveOpponentPack}
+                    className="pack-matchup-inline stats-card-pack-inline"
+                  />
+                </div>
+                <div className="stats-card-meta">
+                  <span>{filters.scope === "battle" ? "Rounds" : "Games"}: {games}</span>
+                  <span>Perspective: {perspectivePack || "Unknown"}</span>
+                </div>
+                <div className="stats-card-metrics">
+                  <div>Avg Turn Length: {formatTurns(avgGameLength)} turns</div>
+                  <div className="rate-win">Winrate{rateLabel}: {formatPct(effectiveGames ? perspectiveWins / effectiveGames : 0)}</div>
+                  <div className="rate-loss">Lossrate{rateLabel}: {formatPct(effectiveGames ? perspectiveLosses / effectiveGames : 0)}</div>
+                  {filters.scope === "battle" ? (
+                    <div>Drawrate{rateLabel}: {formatPct(effectiveGames ? effectiveDraws / effectiveGames : 0)}</div>
+                  ) : null}
+                </div>
+                <div className="stats-card-actions">
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={() => toggleMatchupPerspective(row.pack, row.opponent_pack, defaultFlipped)}
+                  >
+                    Switch to {perspectiveOpponentPack || "Other"} Perspective
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={() => toggleMatchupTurns(row.pack, row.opponent_pack)}
+                    aria-expanded={turnsExpanded}
+                    aria-controls={matchupTurnId}
+                  >
+                    {turnsExpanded ? "Hide Per Turn Metrics" : "Show Per Turn Metrics"}
+                  </button>
+                </div>
+                {turnsExpanded && (
+                  <div
+                    id={matchupTurnId}
+                    className="leaderboard-subtable stats-card-turns"
+                    style={{ "--turn-row-columns": "minmax(52px, 0.6fr) repeat(8, minmax(0, 1fr))" }}
+                  >
+                    <div className="leaderboard-subrow turn head">
+                      <span>
+                        <SemanticLabel type="turn">Turn</SemanticLabel>
+                      </span>
+                      <span>Rounds</span>
+                      <span>Wins</span>
+                      <span>Losses</span>
+                      <span>Draws</span>
+                      <span>Drawrate</span>
+                      <span>Winrate</span>
+                      <span>Avg Rolls</span>
+                      <span className="gold-text">Avg Gold</span>
+                    </div>
+                    {perTurnRows.map((turnRow) => (
+                      <div className="leaderboard-subrow turn" key={`${matchupKey}-turn-${turnRow.turn_number}`}>
+                        <span>{Number(turnRow.turn_number || 0)}</span>
+                        <span>{Number(turnRow.rounds || 0)}</span>
+                        <span className="rate-win">
+                          {isPerspectiveFlipped ? Number(turnRow.losses || 0) : Number(turnRow.wins || 0)}
+                        </span>
+                        <span className="rate-loss">
+                          {isPerspectiveFlipped ? Number(turnRow.wins || 0) : Number(turnRow.losses || 0)}
+                        </span>
+                        <span>{Number(turnRow.draws || 0)}</span>
+                        <span>{formatPct(Number(turnRow.drawrate || 0))}</span>
+                        <span className="rate-win">
+                          {formatPct(
+                            Number(turnRow.rounds || 0)
+                              ? (isPerspectiveFlipped
+                                  ? Number(turnRow.losses || 0)
+                                  : Number(turnRow.wins || 0)) / Number(turnRow.rounds || 0)
+                              : 0
+                          )}
+                        </span>
+                        <span>{formatTurns(Number(turnRow.avg_rolls_per_turn || 0))}</span>
+                        <span className="gold-text">{formatTurns(Number(turnRow.avg_gold_per_turn || 0))}</span>
+                      </div>
+                    ))}
+                    {!perTurnRows.length && (
+                      <div className="leaderboard-subrow empty">
+                        <span>
+                          <SemanticLabel type="turn">No turn-level rows.</SemanticLabel>
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {sortedMatchupStats.length === 0 && !loading && (
+            <div className="stats-card empty">No matchup stats yet.</div>
+          )}
+        </div>
+        {sortedMatchupStats.length > 0 && (
+          <div className="infinite-footer">
+            <div className="page-info">{visibleMatchupStats.length} / {sortedMatchupStats.length}</div>
+            <div ref={matchupSentinelRef} className="list-sentinel" />
+          </div>
+        )}
+        </>
+        )}
       </section>
     </main>
   );

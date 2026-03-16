@@ -1,4 +1,6 @@
-﻿import "./globals.css";
+import "./globals.css";
+import { BackgroundGuard } from "@/app/components/background-guard";
+import { DarkModeImageGuard } from "@/app/components/dark-mode-image-guard";
 
 export const metadata = {
   title: "Sap Library",
@@ -12,10 +14,17 @@ export const metadata = {
   }
 };
 
+export const viewport = {
+  width: "device-width",
+  initialScale: 1
+};
+
 export default function RootLayout({ children }) {
   return (
-    <html lang="en">
-      <body>
+    <html lang="en" suppressHydrationWarning>
+      <body suppressHydrationWarning>
+        <BackgroundGuard />
+        <DarkModeImageGuard />
         {children}
       </body>
     </html>

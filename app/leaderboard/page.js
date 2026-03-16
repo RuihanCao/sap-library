@@ -1,7 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { PackInlineName, PackMatchupInline } from "@/app/components/pack-inline";
+import { SemanticLabel } from "@/app/components/semantic-label";
+import { LocalProfileMarker } from "@/app/components/local-profile-marker";
+import { getPackSprite } from "@/lib/packSprites";
+import { fetchClientMeta } from "@/lib/clientMeta";
 
 const BUILD_BACKGROUNDS = [
   "AboveCloudsBuild.png",
@@ -98,11 +103,19 @@ const THEMES = {
 };
 
 const EXCLUDED_PACKS = ["Custom", "Weekly"];
+const DEFAULT_MIN_MATCH_THRESHOLD = 10;
+const MIN_MATCH_THRESHOLD = 1;
+const FILTER_FALLBACK_SPRITES = {
+  pet: "/Sprite/Pets/Turtle.png",
+  perk: "/Sprite/Food/Honey.png",
+  toy: "/Sprite/Toys/RelicFoamSword.png"
+};
 
 const DEFAULT_FILTERS = {
   scope: "game",
   search: "",
-  minMatches: "1",
+  minMatches: String(DEFAULT_MIN_MATCH_THRESHOLD),
+  version: "current",
   pack: "",
   opponentPack: "",
   pet: [],
@@ -111,9 +124,16 @@ const DEFAULT_FILTERS = {
   minTurn: "",
   maxTurn: "",
   tags: "",
-  sort: "games",
+  sort: "winrate",
   order: "desc",
   pageSize: "25"
+};
+
+const DEFAULT_FILTER_SECTION_VISIBILITY = {
+  general: false,
+  matchup: false,
+  thresholds: false,
+  items: false
 };
 
 function pickTheme(name) {
@@ -141,6 +161,34 @@ function pct(value) {
 
 function fixed(value, digits = 2) {
   return Number(value || 0).toFixed(digits);
+}
+
+function formatAvgElo(value) {
+  const num = Number(value || 0);
+  if (!Number.isFinite(num) || num <= 0) return "-";
+  return num.toFixed(0);
+}
+
+function avgGameLength(rounds, games) {
+  const roundsNum = Number(rounds || 0);
+  const gamesNum = Number(games || 0);
+  if (gamesNum <= 0) return 0;
+  return roundsNum / gamesNum;
+}
+
+function defaultOrderForSort(sortKey) {
+  return sortKey === "player_name" ? "asc" : "desc";
+}
+
+function normalizeMinMatches(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return String(DEFAULT_MIN_MATCH_THRESHOLD);
+  return String(Math.max(MIN_MATCH_THRESHOLD, Math.floor(parsed)));
+}
+
+function pickFilterSprite(list, fallbackSprite) {
+  const sprite = Array.isArray(list) ? list.find((item) => item?.sprite)?.sprite : "";
+  return sprite || fallbackSprite;
 }
 
 function IconMultiSelect({ label, options, selected, onChange, placeholder }) {
@@ -210,8 +258,16 @@ function IconMultiSelect({ label, options, selected, onChange, placeholder }) {
 }
 
 export default function LeaderboardPage() {
-  const [meta, setMeta] = useState({ pets: [], perks: [], toys: [], packs: [] });
+  const [meta, setMeta] = useState({
+    pets: [],
+    perks: [],
+    toys: [],
+    packs: [],
+    versions: [],
+    currentVersion: null
+  });
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
+  const [visibleFilterSections, setVisibleFilterSections] = useState(DEFAULT_FILTER_SECTION_VISIBILITY);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [players, setPlayers] = useState([]);
@@ -220,12 +276,19 @@ export default function LeaderboardPage() {
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailModalOpen, setDetailModalOpen] = useState(false);
+  const [perTurnCollapsed, setPerTurnCollapsed] = useState(true);
+  const listSentinelRef = useRef(null);
+  const autoSearchTimeoutRef = useRef(null);
+  const autoSearchReadyRef = useRef(false);
+  const lastAppliedFilterKeyRef = useRef("");
 
-  const totalPages = Math.max(1, Math.ceil(total / Number(filters.pageSize || 25)));
   const packOptions = useMemo(
     () => (meta.packs || []).filter((pack) => !EXCLUDED_PACKS.includes(pack.name)),
     [meta.packs]
   );
+  const petFilterSprite = pickFilterSprite(meta.pets, FILTER_FALLBACK_SPRITES.pet);
+  const perkFilterSprite = pickFilterSprite(meta.perks, FILTER_FALLBACK_SPRITES.perk);
+  const toyFilterSprite = pickFilterSprite(meta.toys, FILTER_FALLBACK_SPRITES.toy);
 
   useEffect(() => {
     if (!BUILD_BACKGROUNDS.length) return;
@@ -239,22 +302,15 @@ export default function LeaderboardPage() {
   }, []);
 
   useEffect(() => {
-    fetch("/api/meta")
-      .then((res) => res.json())
-      .then((data) => setMeta({
-        pets: data.pets || [],
-        perks: data.perks || [],
-        toys: data.toys || [],
-        packs: data.packs || []
-      }))
-      .catch(() => setMeta({ pets: [], perks: [], toys: [], packs: [] }));
+    fetchClientMeta().then(setMeta);
   }, []);
 
   function buildListParams(nextFilters = filters, nextPage = page, nextPlayerId = selectedPlayerId) {
     const params = new URLSearchParams();
     if (nextFilters.scope) params.set("scope", nextFilters.scope);
     if (nextFilters.search) params.set("search", nextFilters.search);
-    if (nextFilters.minMatches) params.set("minMatches", nextFilters.minMatches);
+    params.set("minMatches", normalizeMinMatches(nextFilters.minMatches));
+    if (nextFilters.version) params.set("version", nextFilters.version);
     if (nextFilters.pack) params.set("pack", nextFilters.pack);
     if (nextFilters.opponentPack) params.set("opponentPack", nextFilters.opponentPack);
     if (nextFilters.pet.length) params.set("pet", nextFilters.pet.join(","));
@@ -273,9 +329,16 @@ export default function LeaderboardPage() {
     return params;
   }
 
+  function clearAutoSearchTimeout() {
+    if (!autoSearchTimeoutRef.current) return;
+    clearTimeout(autoSearchTimeoutRef.current);
+    autoSearchTimeoutRef.current = null;
+  }
+
   function buildDetailParams(nextFilters = filters) {
     const params = new URLSearchParams();
     if (nextFilters.scope) params.set("scope", nextFilters.scope);
+    if (nextFilters.version) params.set("version", nextFilters.version);
     if (nextFilters.pack) params.set("pack", nextFilters.pack);
     if (nextFilters.opponentPack) params.set("opponentPack", nextFilters.opponentPack);
     if (nextFilters.pet.length) params.set("pet", nextFilters.pet.join(","));
@@ -312,12 +375,28 @@ export default function LeaderboardPage() {
   }
 
   async function loadLeaderboard(nextFilters = filters, nextPage = page, nextPlayerId = selectedPlayerId, options = {}) {
+    if (loading && options.append) return;
     const params = buildListParams(nextFilters, nextPage, nextPlayerId);
+    if (!options.append) {
+      lastAppliedFilterKeyRef.current = buildListParams(nextFilters, 1, nextPlayerId).toString();
+    }
     setLoading(true);
     try {
       const res = await fetch(`/api/leaderboard?${params.toString()}`);
       const data = await res.json();
-      setPlayers(data.players || []);
+      const incoming = data.players || [];
+      setPlayers((prev) => {
+        if (!options.append) return incoming;
+        const seen = new Set(prev.map((item) => item.playerId));
+        const merged = [...prev];
+        for (const row of incoming) {
+          if (!seen.has(row.playerId)) {
+            merged.push(row);
+            seen.add(row.playerId);
+          }
+        }
+        return merged;
+      });
       setTotal(Number(data.total || 0));
       setPage(Number(data.page || nextPage));
 
@@ -325,10 +404,10 @@ export default function LeaderboardPage() {
         window.history.replaceState({}, "", `?${params.toString()}`);
       }
 
-      if (nextPlayerId) {
+      if (nextPlayerId && !options.append) {
         await loadDetail(nextPlayerId, nextFilters, { skipUrlSync: true });
       } else {
-        setDetail(null);
+        if (!nextPlayerId) setDetail(null);
       }
     } finally {
       setLoading(false);
@@ -341,7 +420,8 @@ export default function LeaderboardPage() {
       ...DEFAULT_FILTERS,
       scope: params.get("scope") === "battle" ? "battle" : "game",
       search: params.get("search") || "",
-      minMatches: params.get("minMatches") || "1",
+      minMatches: normalizeMinMatches(params.get("minMatches") || String(DEFAULT_MIN_MATCH_THRESHOLD)),
+      version: params.get("version") || "current",
       pack: params.get("pack") || "",
       opponentPack: params.get("opponentPack") || "",
       pet: parseCsvList(params.get("pet")),
@@ -350,7 +430,7 @@ export default function LeaderboardPage() {
       minTurn: params.get("minTurn") || "",
       maxTurn: params.get("maxTurn") || "",
       tags: params.get("tags") || "",
-      sort: params.get("sort") || "games",
+      sort: params.get("sort") || "winrate",
       order: params.get("order") || "desc",
       pageSize: params.get("pageSize") || "25"
     };
@@ -360,8 +440,29 @@ export default function LeaderboardPage() {
     setFilters(nextFilters);
     setSelectedPlayerId(nextPlayerId);
     setDetailModalOpen(Boolean(nextPlayerId));
-    loadLeaderboard(nextFilters, nextPage, nextPlayerId, { skipUrlSync: true });
+    autoSearchReadyRef.current = false;
+    loadLeaderboard(nextFilters, nextPage, nextPlayerId, { skipUrlSync: true }).finally(() => {
+      autoSearchReadyRef.current = true;
+    });
+
+    return () => {
+      clearAutoSearchTimeout();
+      autoSearchReadyRef.current = false;
+    };
   }, []);
+
+  useEffect(() => {
+    if (!autoSearchReadyRef.current) return;
+    clearAutoSearchTimeout();
+    const nextKey = buildListParams(filters, 1, selectedPlayerId).toString();
+    autoSearchTimeoutRef.current = setTimeout(() => {
+      autoSearchTimeoutRef.current = null;
+      if (nextKey === lastAppliedFilterKeyRef.current) return;
+      loadLeaderboard(filters, 1, selectedPlayerId);
+    }, 1500);
+
+    return () => clearAutoSearchTimeout();
+  }, [filters]);
 
   useEffect(() => {
     const onKeyDown = (event) => {
@@ -373,12 +474,33 @@ export default function LeaderboardPage() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [filters, page]);
 
+  useEffect(() => {
+    const node = listSentinelRef.current;
+    if (!node) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (!entry?.isIntersecting) return;
+        if (loading) return;
+        if (players.length >= total) return;
+        loadLeaderboard(filters, page + 1, selectedPlayerId, { append: true });
+      },
+      { root: null, rootMargin: "260px 0px", threshold: 0.01 }
+    );
+
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [players.length, total, page, loading, filters, selectedPlayerId]);
+
   function submitSearch(event) {
     event.preventDefault();
+    clearAutoSearchTimeout();
     loadLeaderboard(filters, 1, selectedPlayerId);
   }
 
   function resetFilters() {
+    clearAutoSearchTimeout();
     setFilters(DEFAULT_FILTERS);
     setSelectedPlayerId("");
     setDetail(null);
@@ -386,11 +508,28 @@ export default function LeaderboardPage() {
   }
 
   function selectPlayer(playerId) {
+    setPerTurnCollapsed(true);
     setSelectedPlayerId(playerId);
     setDetailModalOpen(true);
     loadDetail(playerId);
     const nextParams = buildListParams(filters, page, playerId);
     window.history.replaceState({}, "", `?${nextParams.toString()}`);
+  }
+
+  function toggleSort(sortKey) {
+    clearAutoSearchTimeout();
+    const nextOrder =
+      filters.sort === sortKey
+        ? (filters.order === "asc" ? "desc" : "asc")
+        : defaultOrderForSort(sortKey);
+    const nextFilters = { ...filters, sort: sortKey, order: nextOrder };
+    setFilters(nextFilters);
+    loadLeaderboard(nextFilters, 1, selectedPlayerId);
+  }
+
+  function sortIndicator(sortKey) {
+    if (filters.sort !== sortKey) return "";
+    return filters.order === "asc" ? "↑" : "↓";
   }
 
   function closeDetailModal() {
@@ -401,81 +540,192 @@ export default function LeaderboardPage() {
     window.history.replaceState({}, "", `?${nextParams.toString()}`);
   }
 
+  function toggleFilterSection(sectionKey) {
+    setVisibleFilterSections((prev) => ({ ...prev, [sectionKey]: !prev[sectionKey] }));
+  }
+
   return (
     <main>
-      <div className="top-nav">
-        <Link href="/" className="nav-link">Explorer</Link>
-        <Link href="/stats" className="nav-link">Stats</Link>
-        <Link href="/leaderboard" className="nav-link active">Leaderboard</Link>
-      </div>
-
       <section className="hero">
         <div className="hero-copy">
           <h1>Sap Library</h1>
           <p>Player leaderboard and deep profile analytics by user ID.</p>
         </div>
+        <nav className="top-nav">
+          <Link href="/" className="nav-link">Explorer</Link>
+          <Link href="/stats" className="nav-link">Stats</Link>
+          <Link href="/leaderboard" className="nav-link active">Leaderboard</Link>
+          <Link href="/profile" className="nav-link">Profile</Link>
+          <Link href="/boards" className="nav-link">Boards</Link>
+          <LocalProfileMarker />
+        </nav>
       </section>
 
       <section className="section filters-section">
         <div className="section-head">
-          <h2>Leaderboard Filters</h2>
+          <h2>Leaderboard Search</h2>
         </div>
         <form onSubmit={submitSearch}>
-          <div className="filters">
-            <div className="field">
-              <label>Scope</label>
-              <select
-                value={filters.scope}
-                onChange={(e) => setFilters({ ...filters, scope: e.target.value })}
-              >
-                <option value="game">Per Game</option>
-                <option value="battle">Per Round</option>
-              </select>
-            </div>
-            <div className="field">
-              <label>Player Search (Name/ID)</label>
-              <input
-                value={filters.search}
-                onChange={(e) => setFilters({ ...filters, search: e.target.value })}
-                placeholder="Search player name or user ID"
-              />
-            </div>
-            <div className="field">
-              <label>Min Match Threshold</label>
-              <input
-                value={filters.minMatches}
-                onChange={(e) => setFilters({ ...filters, minMatches: e.target.value })}
-                placeholder="1"
-              />
-            </div>
-            <div className="field">
-              <label>Your Pack</label>
-              <select
-                value={filters.pack}
-                onChange={(e) => setFilters({ ...filters, pack: e.target.value })}
-              >
-                <option value="">Any</option>
-                {packOptions.map((pack) => (
-                  <option key={pack.id} value={pack.name}>{pack.name}</option>
-                ))}
-              </select>
-            </div>
-            <div className="field">
-              <label>Opponent Pack</label>
-              <select
-                value={filters.opponentPack}
-                onChange={(e) => setFilters({ ...filters, opponentPack: e.target.value })}
-              >
-                <option value="">Any</option>
-                {packOptions.map((pack) => (
-                  <option key={pack.id} value={pack.name}>{pack.name}</option>
-                ))}
-              </select>
-            </div>
-            {filters.scope === "battle" && (
-              <>
+          <div className="toggles">
+            <button
+              type="button"
+              className={visibleFilterSections.general ? "toggle active" : "toggle"}
+              onClick={() => toggleFilterSection("general")}
+            >
+              Scope + Player
+            </button>
+            <button
+              type="button"
+              className={visibleFilterSections.matchup ? "toggle active" : "toggle"}
+              onClick={() => toggleFilterSection("matchup")}
+            >
+              Pack Matchup
+            </button>
+            <button
+              type="button"
+              className={visibleFilterSections.thresholds ? "toggle active" : "toggle"}
+              onClick={() => toggleFilterSection("thresholds")}
+            >
+              Sample Size
+            </button>
+            <button
+              type="button"
+              className={visibleFilterSections.items ? "toggle with-icon active" : "toggle with-icon"}
+              onClick={() => toggleFilterSection("items")}
+            >
+              <img className="toggle-icon" src={petFilterSprite} alt="" />
+              Board + Turns
+            </button>
+          </div>
+          <div className="filter-categories">
+            {visibleFilterSections.general && (
+              <div className="filter-category">
+              <div className="filter-category-head">
+                <h3>Scope + Player</h3>
+                <p>Main search scope, player lookup, version, and page size.</p>
+              </div>
+              <div className="filters">
                 <div className="field">
-                  <label>Min Turn</label>
+                  <label>Scope</label>
+                  <select
+                    value={filters.scope}
+                    onChange={(e) => setFilters({ ...filters, scope: e.target.value })}
+                  >
+                    <option value="game">Per Game</option>
+                    <option value="battle">Per Round</option>
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Player Name or ID</label>
+                  <input
+                    value={filters.search}
+                    onChange={(e) => setFilters({ ...filters, search: e.target.value })}
+                    placeholder="Search player name or user ID"
+                  />
+                </div>
+                <div className="field">
+                  <label>Version</label>
+                  <select
+                    value={filters.version}
+                    onChange={(e) => setFilters({ ...filters, version: e.target.value })}
+                  >
+                    <option value="current">
+                      Current
+                      {meta.currentVersion ? ` (${meta.currentVersion})` : ""}
+                    </option>
+                    <option value="all">All Versions</option>
+                    {(meta.versions || []).map((version) => (
+                      <option key={version} value={version}>
+                        {version}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Page Size</label>
+                  <select
+                    value={filters.pageSize}
+                    onChange={(e) => setFilters({ ...filters, pageSize: e.target.value })}
+                  >
+                    <option value="10">10</option>
+                    <option value="25">25</option>
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                  </select>
+                </div>
+              </div>
+              </div>
+            )}
+
+            {visibleFilterSections.matchup && (
+              <div className="filter-category">
+              <div className="filter-category-head">
+                <h3>Pack Matchup</h3>
+                <p>Restrict leaderboard rows to specific pack pairings.</p>
+              </div>
+              <div className="filters">
+                <div className="field">
+                  <label>Your Pack</label>
+                  <select
+                    value={filters.pack}
+                    onChange={(e) => setFilters({ ...filters, pack: e.target.value })}
+                  >
+                    <option value="">Any</option>
+                    {packOptions.map((pack) => (
+                      <option key={pack.id} value={pack.name}>{pack.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Opponent Pack</label>
+                  <select
+                    value={filters.opponentPack}
+                    onChange={(e) => setFilters({ ...filters, opponentPack: e.target.value })}
+                  >
+                    <option value="">Any</option>
+                    {packOptions.map((pack) => (
+                      <option key={pack.id} value={pack.name}>{pack.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              </div>
+            )}
+
+            {visibleFilterSections.thresholds && (
+              <div className="filter-category">
+              <div className="filter-category-head">
+                <h3>Sample Size</h3>
+                <p>Set a minimum match count for leaderboard rows.</p>
+              </div>
+              <div className="filters">
+                <div className="field">
+                  <label>Minimum Matches</label>
+                  <input
+                    type="number"
+                    min={MIN_MATCH_THRESHOLD}
+                    step="1"
+                    value={filters.minMatches}
+                    onChange={(e) => setFilters({ ...filters, minMatches: e.target.value })}
+                    onBlur={(e) => setFilters({ ...filters, minMatches: normalizeMinMatches(e.target.value) })}
+                    placeholder={String(DEFAULT_MIN_MATCH_THRESHOLD)}
+                  />
+                </div>
+              </div>
+              </div>
+            )}
+
+            {visibleFilterSections.items && (
+              <div className="filter-category">
+              <div className="filter-category-head">
+                <h3>Board + Turns</h3>
+                <p>Filter by turn window, board pieces (pets/perks/toys), and tags.</p>
+              </div>
+              <div className="filters">
+                <div className="field">
+                  <label>
+                    <SemanticLabel type="turn">Min Turn</SemanticLabel>
+                  </label>
                   <input
                     value={filters.minTurn}
                     onChange={(e) => setFilters({ ...filters, minTurn: e.target.value })}
@@ -483,90 +733,66 @@ export default function LeaderboardPage() {
                   />
                 </div>
                 <div className="field">
-                  <label>Max Turn</label>
+                  <label>
+                    <SemanticLabel type="turn">Max Turn</SemanticLabel>
+                  </label>
                   <input
                     value={filters.maxTurn}
                     onChange={(e) => setFilters({ ...filters, maxTurn: e.target.value })}
                     placeholder="15"
                   />
                 </div>
-              </>
+                <div className="field">
+                  <label>Tags</label>
+                  <input
+                    value={filters.tags}
+                    onChange={(e) => setFilters({ ...filters, tags: e.target.value })}
+                    placeholder="tournament, finals"
+                  />
+                </div>
+                <IconMultiSelect
+                  label={(
+                    <span className="multi-label-with-icon">
+                      <img src={petFilterSprite} alt="" className="multi-label-icon" />
+                      <span>Pet Filter</span>
+                    </span>
+                  )}
+                  options={meta.pets || []}
+                  selected={filters.pet}
+                  onChange={(value) => setFilters({ ...filters, pet: value })}
+                  placeholder="Search pets and add"
+                />
+                <IconMultiSelect
+                  label={(
+                    <span className="multi-label-with-icon">
+                      <img src={perkFilterSprite} alt="" className="multi-label-icon" />
+                      <span>Perk Filter</span>
+                    </span>
+                  )}
+                  options={meta.perks || []}
+                  selected={filters.perk}
+                  onChange={(value) => setFilters({ ...filters, perk: value })}
+                  placeholder="Search perks and add"
+                />
+                <IconMultiSelect
+                  label={(
+                    <span className="multi-label-with-icon">
+                      <img src={toyFilterSprite} alt="" className="multi-label-icon" />
+                      <span>Toy Filter</span>
+                    </span>
+                  )}
+                  options={meta.toys || []}
+                  selected={filters.toy}
+                  onChange={(value) => setFilters({ ...filters, toy: value })}
+                  placeholder="Search toys and add"
+                />
+              </div>
+              </div>
             )}
-            <div className="field">
-              <label>Sort</label>
-              <select
-                value={filters.sort}
-                onChange={(e) => setFilters({ ...filters, sort: e.target.value })}
-              >
-                <option value="games">Games</option>
-                <option value="rounds">Rounds</option>
-                <option value="wins">Wins</option>
-                <option value="losses">Losses</option>
-                <option value="draws">Draws</option>
-                <option value="winrate">Winrate</option>
-                <option value="lossrate">Lossrate</option>
-                <option value="drawrate">Drawrate</option>
-                <option value="avg_rolls">Avg Rolls/Turn</option>
-                <option value="avg_gold">Avg Gold/Turn</option>
-                <option value="avg_summons">Avg Summons/Turn</option>
-                <option value="player_name">Player Name</option>
-              </select>
-            </div>
-            <div className="field">
-              <label>Order</label>
-              <select
-                value={filters.order}
-                onChange={(e) => setFilters({ ...filters, order: e.target.value })}
-              >
-                <option value="desc">Desc</option>
-                <option value="asc">Asc</option>
-              </select>
-            </div>
-            <div className="field">
-              <label>Page Size</label>
-              <select
-                value={filters.pageSize}
-                onChange={(e) => setFilters({ ...filters, pageSize: e.target.value })}
-              >
-                <option value="10">10</option>
-                <option value="25">25</option>
-                <option value="50">50</option>
-                <option value="100">100</option>
-              </select>
-            </div>
-            <div className="field">
-              <label>Tags (comma)</label>
-              <input
-                value={filters.tags}
-                onChange={(e) => setFilters({ ...filters, tags: e.target.value })}
-                placeholder="tournament, finals"
-              />
-            </div>
-            <IconMultiSelect
-              label="Pet Filter"
-              options={meta.pets || []}
-              selected={filters.pet}
-              onChange={(value) => setFilters({ ...filters, pet: value })}
-              placeholder="Search pets and add"
-            />
-            <IconMultiSelect
-              label="Perk Filter"
-              options={meta.perks || []}
-              selected={filters.perk}
-              onChange={(value) => setFilters({ ...filters, perk: value })}
-              placeholder="Search perks and add"
-            />
-            <IconMultiSelect
-              label="Toy Filter"
-              options={meta.toys || []}
-              selected={filters.toy}
-              onChange={(value) => setFilters({ ...filters, toy: value })}
-              placeholder="Search toys and add"
-            />
           </div>
           <div className="actions">
-            <button type="submit">Search</button>
-            <button type="button" className="secondary" onClick={resetFilters}>Reset</button>
+            <button type="submit">Apply Now</button>
+            <button type="button" className="secondary" onClick={resetFilters}>Clear Filters</button>
           </div>
         </form>
       </section>
@@ -581,50 +807,86 @@ export default function LeaderboardPage() {
 
         <div className={`leaderboard-table ${filters.scope === "battle" ? "scope-battle" : "scope-game"}`}>
           <div className="leaderboard-row leaderboard-head">
-            <span>Player</span>
-            <span>Games</span>
-            <span>Rounds</span>
-            <span>Wins</span>
-            <span>Losses</span>
-            <span className="col-draw">Draws</span>
-            <span>Winrate</span>
-            <span>Avg Rolls</span>
-            <span>Avg Gold</span>
-          </div>
-          {players.map((player) => (
-            <button
-              key={player.playerId}
-              type="button"
-              className={`leaderboard-row${selectedPlayerId === player.playerId ? " active" : ""}`}
-              onClick={() => selectPlayer(player.playerId)}
-            >
-              <span className="player-cell">
-                <strong>{player.playerName || "Unknown"}</strong>
-                <small>{player.playerId}</small>
-              </span>
-              <span>{player.games}</span>
-              <span>{player.rounds}</span>
-              <span>{player.wins}</span>
-              <span>{player.losses}</span>
-              <span className="col-draw">{player.draws}</span>
-              <span>{pct(player.winrate)}</span>
-              <span>{fixed(player.avgRollsPerTurn)}</span>
-              <span>{fixed(player.avgGoldPerTurn)}</span>
+            <button type="button" className={`leaderboard-sort-btn ${filters.sort === "player_name" ? "active" : ""}`} onClick={() => toggleSort("player_name")}>
+              Player <span>{sortIndicator("player_name")}</span>
             </button>
-          ))}
+            <button type="button" className={`leaderboard-sort-btn ${filters.sort === "games" ? "active" : ""}`} onClick={() => toggleSort("games")}>
+              Games <span>{sortIndicator("games")}</span>
+            </button>
+            <button type="button" className={`leaderboard-sort-btn ${filters.sort === "rounds" ? "active" : ""}`} onClick={() => toggleSort("rounds")}>
+              Rounds <span>{sortIndicator("rounds")}</span>
+            </button>
+            <button type="button" className={`leaderboard-sort-btn ${filters.sort === "wins" ? "active" : ""}`} onClick={() => toggleSort("wins")}>
+              Wins <span>{sortIndicator("wins")}</span>
+            </button>
+            <button type="button" className={`leaderboard-sort-btn ${filters.sort === "losses" ? "active" : ""}`} onClick={() => toggleSort("losses")}>
+              Losses <span>{sortIndicator("losses")}</span>
+            </button>
+            <button type="button" className={`leaderboard-sort-btn col-draw ${filters.sort === "draws" ? "active" : ""}`} onClick={() => toggleSort("draws")}>
+              Draws <span>{sortIndicator("draws")}</span>
+            </button>
+            <button type="button" className={`leaderboard-sort-btn ${filters.sort === "winrate" ? "active" : ""}`} onClick={() => toggleSort("winrate")}>
+              Winrate <span>{sortIndicator("winrate")}</span>
+            </button>
+            <button type="button" className={`leaderboard-sort-btn ${filters.sort === "avg_rolls" ? "active" : ""}`} onClick={() => toggleSort("avg_rolls")}>
+              Avg Rolls <span>{sortIndicator("avg_rolls")}</span>
+            </button>
+            <button type="button" className={`leaderboard-sort-btn gold-text ${filters.sort === "avg_gold" ? "active" : ""}`} onClick={() => toggleSort("avg_gold")}>
+              Avg Gold <span>{sortIndicator("avg_gold")}</span>
+            </button>
+            <button type="button" className={`leaderboard-sort-btn ${filters.sort === "avg_elo" ? "active" : ""}`} onClick={() => toggleSort("avg_elo")}>
+              Avg Elo <span>{sortIndicator("avg_elo")}</span>
+            </button>
+            <button type="button" className={`leaderboard-sort-btn ${filters.sort === "avg_game_length" ? "active" : ""}`} onClick={() => toggleSort("avg_game_length")}>
+              Avg Game Length <span>{sortIndicator("avg_game_length")}</span>
+            </button>
+          </div>
+          {players.map((player) => {
+            const mostPlayedPackSprite = getPackSprite(player.mostPlayedPack);
+
+            return (
+              <button
+                key={player.playerId}
+                type="button"
+                className={`leaderboard-row${selectedPlayerId === player.playerId ? " active" : ""}`}
+                onClick={() => selectPlayer(player.playerId)}
+              >
+                <span className="player-cell">
+                  <strong className="player-name-line">
+                    {mostPlayedPackSprite ? (
+                      <img
+                        src={mostPlayedPackSprite}
+                        alt={player.mostPlayedPack ? `${player.mostPlayedPack} pack pet` : "Pack pet"}
+                        className="player-pack-pet"
+                        title={player.mostPlayedPack ? `Most played pack: ${player.mostPlayedPack}` : "Most played pack"}
+                      />
+                    ) : null}
+                    <span>{player.playerName || "Unknown"}</span>
+                  </strong>
+                  <small>{player.playerId}</small>
+                </span>
+                <span className="metric-cell" data-label="Games">{player.games}</span>
+                <span className="metric-cell" data-label="Rounds">{player.rounds}</span>
+                <span className="metric-cell rate-win" data-label="Wins">{player.wins}</span>
+                <span className="metric-cell rate-loss" data-label="Losses">{player.losses}</span>
+                <span className="metric-cell col-draw" data-label="Draws">{player.draws}</span>
+                <span className="metric-cell rate-win" data-label="Winrate">{pct(player.winrate)}</span>
+                <span className="metric-cell" data-label="Avg Rolls">{fixed(player.avgRollsPerTurn)}</span>
+                <span className="metric-cell gold-text" data-label="Avg Gold">{fixed(player.avgGoldPerTurn)}</span>
+                <span className="metric-cell" data-label="Avg Elo">{formatAvgElo(player.avgElo)}</span>
+                <span className="metric-cell" data-label="Avg Game Length">{fixed(player.avgGameLength, 2)}</span>
+              </button>
+            );
+          })}
           {!loading && players.length === 0 && (
             <div className="leaderboard-empty">No players match these filters.</div>
           )}
         </div>
 
-        <div className="pagination">
-          <button disabled={page <= 1 || loading} onClick={() => loadLeaderboard(filters, page - 1, selectedPlayerId)}>
-            Prev
-          </button>
-          <div className="page-info">Page {page} / {totalPages}</div>
-          <button disabled={page >= totalPages || loading} onClick={() => loadLeaderboard(filters, page + 1, selectedPlayerId)}>
-            Next
-          </button>
+        <div className="infinite-footer">
+          <div className="page-info">{players.length} / {total}</div>
+          <div ref={listSentinelRef} className="list-sentinel" />
+          {loading && players.length < total ? <div className="muted">Loading more...</div> : null}
         </div>
       </section>
 
@@ -659,11 +921,11 @@ export default function LeaderboardPage() {
                   </div>
                   <div className="stats-summary-item">
                     <span className="label">Wins</span>
-                    <strong>{Number(detail.summary?.wins || 0)}</strong>
+                    <strong className="rate-win">{Number(detail.summary?.wins || 0)}</strong>
                   </div>
                   <div className="stats-summary-item">
                     <span className="label">Losses</span>
-                    <strong>{Number(detail.summary?.losses || 0)}</strong>
+                    <strong className="rate-loss">{Number(detail.summary?.losses || 0)}</strong>
                   </div>
                   {filters.scope === "battle" && (
                     <div className="stats-summary-item">
@@ -673,11 +935,11 @@ export default function LeaderboardPage() {
                   )}
                   <div className="stats-summary-item">
                     <span className="label">Winrate</span>
-                    <strong>{pct(detail.summary?.winrate)}</strong>
+                    <strong className="rate-win">{pct(detail.summary?.winrate)}</strong>
                   </div>
                   <div className="stats-summary-item">
                     <span className="label">Lossrate</span>
-                    <strong>{pct(detail.summary?.lossrate)}</strong>
+                    <strong className="rate-loss">{pct(detail.summary?.lossrate)}</strong>
                   </div>
                   {filters.scope === "battle" && (
                     <div className="stats-summary-item">
@@ -686,12 +948,20 @@ export default function LeaderboardPage() {
                     </div>
                   )}
                   <div className="stats-summary-item">
-                    <span className="label">Avg Rolls/Turn</span>
+                    <span className="label">
+                      <SemanticLabel type="turn">Avg Rolls/Turn</SemanticLabel>
+                    </span>
                     <strong>{fixed(detail.summary?.avgRollsPerTurn)}</strong>
                   </div>
                   <div className="stats-summary-item">
-                    <span className="label">Avg Gold/Turn</span>
-                    <strong>{fixed(detail.summary?.avgGoldPerTurn)}</strong>
+                    <span className="label gold-text">
+                      <SemanticLabel type="turn">Avg Gold/Turn</SemanticLabel>
+                    </span>
+                    <strong className="gold-text">{fixed(detail.summary?.avgGoldPerTurn)}</strong>
+                  </div>
+                  <div className="stats-summary-item">
+                    <span className="label">Avg Game Length</span>
+                    <strong>{fixed(avgGameLength(detail.summary?.rounds, detail.summary?.games), 2)}</strong>
                   </div>
                 </div>
 
@@ -702,14 +972,14 @@ export default function LeaderboardPage() {
                       {detail.packStats?.map((row) => (
                         <div className="stats-card" key={`pack-${row.pack}`}>
                           <div className="stats-card-head">
-                            <h4>{row.pack}</h4>
+                            <PackInlineName name={row.pack} className="pack-name-inline stats-card-pack-inline" />
                           </div>
                           <div className="stats-card-metrics">
                             <div>{filters.scope === "battle" ? "Rounds" : "Games"}: {Number(row.rounds ?? row.games ?? 0)}</div>
-                            <div>Wins: {Number(row.wins || 0)}</div>
-                            <div>Losses: {Number(row.losses || 0)}</div>
+                            <div className="rate-win">Wins: {Number(row.wins || 0)}</div>
+                            <div className="rate-loss">Losses: {Number(row.losses || 0)}</div>
                             {filters.scope === "battle" && <div>Draws: {Number(row.draws || 0)}</div>}
-                            <div>Winrate: {pct(row.winrate)}</div>
+                            <div className="rate-win">Winrate: {pct(row.winrate)}</div>
                           </div>
                         </div>
                       ))}
@@ -730,12 +1000,14 @@ export default function LeaderboardPage() {
                       </div>
                       {detail.matchupStats?.map((row) => (
                         <div className={`leaderboard-subrow matchup ${filters.scope === "battle" ? "battle" : "game"}`} key={`${row.pack}-${row.opponent_pack}`}>
-                          <span>{row.pack} vs {row.opponent_pack}</span>
+                          <span>
+                            <PackMatchupInline pack={row.pack} opponentPack={row.opponent_pack} />
+                          </span>
                           <span>{Number(row.rounds ?? row.games ?? 0)}</span>
-                          <span>{Number(row.wins || 0)}</span>
-                          <span>{Number(row.losses || 0)}</span>
+                          <span className="rate-win">{Number(row.wins || 0)}</span>
+                          <span className="rate-loss">{Number(row.losses || 0)}</span>
                           {filters.scope === "battle" && <span>{Number(row.draws || 0)}</span>}
-                          <span>{pct(row.winrate)}</span>
+                          <span className="rate-win">{pct(row.winrate)}</span>
                         </div>
                       ))}
                       {!detail.matchupStats?.length && (
@@ -748,36 +1020,57 @@ export default function LeaderboardPage() {
                 </div>
 
                 <div className="leaderboard-detail-block">
-                  <h3>Per Turn Metrics</h3>
-                  <div className="leaderboard-subtable">
-                    <div className="leaderboard-subrow turn head">
-                      <span>Turn</span>
-                      <span>Rounds</span>
-                      <span>Wins</span>
-                      <span>Losses</span>
-                      <span>Draws</span>
-                      <span>Winrate</span>
-                      <span>Avg Rolls</span>
-                      <span>Avg Gold</span>
-                    </div>
-                    {detail.perTurn?.map((row) => (
-                      <div className="leaderboard-subrow turn" key={`turn-${row.turn_number}`}>
-                        <span>{row.turn_number}</span>
-                        <span>{Number(row.rounds || 0)}</span>
-                        <span>{Number(row.wins || 0)}</span>
-                        <span>{Number(row.losses || 0)}</span>
-                        <span>{Number(row.draws || 0)}</span>
-                        <span>{pct(row.winrate)}</span>
-                        <span>{fixed(row.avg_rolls_per_turn)}</span>
-                        <span>{fixed(row.avg_gold_per_turn)}</span>
-                      </div>
-                    ))}
-                    {!detail.perTurn?.length && (
-                      <div className="leaderboard-subrow empty">
-                        <span>No turn-level rows.</span>
-                      </div>
-                    )}
+                  <div className="leaderboard-block-head">
+                    <h3>
+                      <button
+                        type="button"
+                        className="leaderboard-turn-toggle"
+                        onClick={() => setPerTurnCollapsed((prev) => !prev)}
+                        aria-expanded={!perTurnCollapsed}
+                        aria-controls="leaderboard-per-turn-metrics"
+                      >
+                        <SemanticLabel type="turn">Per Turn Metrics</SemanticLabel>
+                        <span className="leaderboard-turn-toggle-indicator" aria-hidden="true">
+                          {perTurnCollapsed ? "▸" : "▾"}
+                        </span>
+                      </button>
+                    </h3>
                   </div>
+                  {!perTurnCollapsed && (
+                    <div id="leaderboard-per-turn-metrics" className="leaderboard-subtable">
+                      <div className="leaderboard-subrow turn head">
+                        <span>
+                          <SemanticLabel type="turn">Turn</SemanticLabel>
+                        </span>
+                        <span>Rounds</span>
+                        <span>Wins</span>
+                        <span>Losses</span>
+                        <span>Draws</span>
+                        <span>Winrate</span>
+                        <span>Avg Rolls</span>
+                        <span className="gold-text">Avg Gold</span>
+                      </div>
+                      {detail.perTurn?.map((row) => (
+                        <div className="leaderboard-subrow turn" key={`turn-${row.turn_number}`}>
+                          <span>{row.turn_number}</span>
+                          <span>{Number(row.rounds || 0)}</span>
+                          <span className="rate-win">{Number(row.wins || 0)}</span>
+                          <span className="rate-loss">{Number(row.losses || 0)}</span>
+                          <span>{Number(row.draws || 0)}</span>
+                          <span className="rate-win">{pct(row.winrate)}</span>
+                          <span>{fixed(row.avg_rolls_per_turn)}</span>
+                          <span className="gold-text">{fixed(row.avg_gold_per_turn)}</span>
+                        </div>
+                      ))}
+                      {!detail.perTurn?.length && (
+                        <div className="leaderboard-subrow empty">
+                          <span>
+                            <SemanticLabel type="turn">No turn-level rows.</SemanticLabel>
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </>
             )}

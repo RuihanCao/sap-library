@@ -25,8 +25,17 @@ If you already created tables, run this once in Neon SQL editor:
 ```sql
 alter table replays add column if not exists game_version text;
 alter table replays add column if not exists opponent_pack text;
+alter table replays add column if not exists player_id text;
+alter table replays add column if not exists opponent_id text;
+alter table replays add column if not exists opponent_participation_id text;
+alter table replays add column if not exists player_rank int;
+alter table replays add column if not exists opponent_rank int;
 create index if not exists idx_replays_game_version on replays(game_version);
 create index if not exists idx_replays_opponent_pack on replays(opponent_pack);
+create index if not exists idx_replays_player_id on replays(player_id);
+create index if not exists idx_replays_opponent_id on replays(opponent_id);
+create index if not exists idx_replays_player_rank on replays(player_rank);
+create index if not exists idx_replays_opponent_rank on replays(opponent_rank);
 ```
 
 4) Run dev server:
@@ -41,8 +50,17 @@ Open `http://localhost:3000`.
 - `POST /api/replays` with `{ "participationId": "..." }` to ingest a replay
 - `GET /api/search?player=...&pack=...&pet=...&perk=...&turn=...` to search
 - `GET /api/replays/:id/image` to render a replay image
+- `GET /api/replays/:id/turns` to fetch full turn-level data (turn stats + pets by side/turn)
 
 ## Notes
 
 - `canvas` may require build tools on Windows.
 - The app logs into Teamwood to fetch a bearer token automatically using `SAP_EMAIL` and `SAP_PASSWORD`.
+- To backfill version 45 rank + IDs after upgrading schema:
+```powershell
+npm run backfill:ranks-v45
+```
+- To backfill ranks/IDs for replays created in the last hour (all versions):
+```powershell
+npm run backfill:ranks-recent
+```

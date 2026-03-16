@@ -2,6 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { LocalProfileMarker } from "@/app/components/local-profile-marker";
+import { PackInlineName, PackMatchupInline } from "@/app/components/pack-inline";
+import { fetchClientMeta } from "@/lib/clientMeta";
+import { LOCAL_PROFILE_EVENT, readLocalProfile } from "@/lib/localProfile";
+import { hasSummitTag } from "@/lib/replayTags";
 
 const BUILD_BACKGROUNDS = [
   "AboveCloudsBuild.png",
@@ -145,6 +150,9 @@ const THEMES = {
   }
 };
 
+const REPLAY_IMAGE_HEADER_HEIGHT = 36;
+const REPLAY_IMAGE_ROW_HEIGHT = 125;
+
 function pickTheme(name) {
   const lower = name.toLowerCase();
   if (lower.includes("arctic") || lower.includes("snow") || lower.includes("winter") || lower.includes("moon") || lower.includes("space") || lower.includes("lunar")) {
@@ -277,14 +285,18 @@ function getGameTypeIcon(matchType) {
 const DEFAULT_FILTERS = {
   player: "",
   playerId: "",
+  pid: "",
   opponent: "",
+  version: "current",
   minRank: "",
   minRankMode: "any",
   packA: "",
   packB: "",
+  winningPack: "",
+  losingPack: "",
+  excludeMirrors: false,
   excludeA: "",
   excludeB: "",
-  mirrorMatch: false,
   petMode: "any",
   perkMode: "any",
   toyMode: "any",
@@ -306,6 +318,8 @@ const DEFAULT_FILTERS = {
   endDate: "",
   tags: "",
   turn: "",
+  minTurn: "",
+  maxTurn: "",
   sort: "created_at",
   order: "desc",
   pageSize: "10"
@@ -320,6 +334,9 @@ const DEFAULT_ENABLED = {
   turn: false,
   matchType: false
 };
+
+const EXTENSION_ID = "ijgpconmeiannfdahleaekbpiflelmea";
+const EXTENSION_URL = "https://chromewebstore.google.com/detail/ijgpconmeiannfdahleaekbpiflelmea?utm_source=item-share-cb";
 
 export default function Page() {
   const [bulkText, setBulkText] = useState("");
@@ -337,7 +354,7 @@ export default function Page() {
     active: false
   });
   const [progressPulse, setProgressPulse] = useState(0);
-  const [meta, setMeta] = useState({ pets: [], perks: [], toys: [], packs: [] });
+  const [meta, setMeta] = useState({ pets: [], perks: [], toys: [], packs: [], versions: [], currentVersion: null });
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
   const [enabled, setEnabled] = useState(DEFAULT_ENABLED);
   const [advancedEnabled, setAdvancedEnabled] = useState(false);
@@ -359,7 +376,13 @@ export default function Page() {
   const [showTagEditor, setShowTagEditor] = useState(false);
   const [shareStatus, setShareStatus] = useState("");
   const [modalShareStatus, setModalShareStatus] = useState("");
+  const [modalCalcStatus, setModalCalcStatus] = useState("");
+  const [modalCalcLoading, setModalCalcLoading] = useState(false);
+  const [modalCalcHover, setModalCalcHover] = useState(null);
+  const [showExtensionBanner, setShowExtensionBanner] = useState(true);
+  const [localProfileId, setLocalProfileId] = useState("");
   const listSentinelRef = useRef(null);
+  const modalCalcStatusTimeoutRef = useRef(null);
   const replayImageVersion = "2026-02-12-text-fix";
 
   useEffect(() => {
@@ -374,10 +397,86 @@ export default function Page() {
   }, []);
 
   useEffect(() => {
-    fetch("/api/meta")
-      .then((res) => res.json())
-      .then((data) => setMeta(data))
-      .catch(() => setMeta({ pets: [], perks: [], toys: [], packs: [] }));
+    fetchClientMeta().then(setMeta);
+  }, []);
+
+  useEffect(() => {
+    const syncLocalProfile = () => {
+      const profile = readLocalProfile();
+      setLocalProfileId((profile.playerId || "").toLowerCase());
+    };
+    syncLocalProfile();
+    window.addEventListener("storage", syncLocalProfile);
+    window.addEventListener(LOCAL_PROFILE_EVENT, syncLocalProfile);
+    return () => {
+      window.removeEventListener("storage", syncLocalProfile);
+      window.removeEventListener(LOCAL_PROFILE_EVENT, syncLocalProfile);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const hideBanner = () => {
+      if (!cancelled) setShowExtensionBanner(false);
+    };
+
+    try {
+      const cached = window.localStorage.getItem("sap_replay_extension_installed");
+      if (cached === "1") {
+        hideBanner();
+      }
+    } catch {
+      // ignore
+    }
+
+    const onMessage = (event) => {
+      if (event?.data?.type === "SAP_REPLAY_EXTENSION_INSTALLED") {
+        try {
+          window.localStorage.setItem("sap_replay_extension_installed", "1");
+        } catch {
+          // ignore
+        }
+        hideBanner();
+      }
+    };
+    window.addEventListener("message", onMessage);
+
+    const runtime = window.chrome?.runtime;
+    if (!runtime?.sendMessage) {
+      return () => {
+        cancelled = true;
+        window.removeEventListener("message", onMessage);
+      };
+    }
+
+    let settled = false;
+    const timeout = window.setTimeout(() => {
+      settled = true;
+    }, 800);
+
+    try {
+      runtime.sendMessage(EXTENSION_ID, { type: "SAP_LIBRARY_PING" }, () => {
+        if (cancelled || settled) return;
+        settled = true;
+        window.clearTimeout(timeout);
+        if (!window.chrome?.runtime?.lastError) {
+          try {
+            window.localStorage.setItem("sap_replay_extension_installed", "1");
+          } catch {
+            // ignore
+          }
+          hideBanner();
+        }
+      });
+    } catch {
+      window.clearTimeout(timeout);
+    }
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+      window.removeEventListener("message", onMessage);
+    };
   }, []);
 
   useEffect(() => {
@@ -404,6 +503,33 @@ export default function Page() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
+  useEffect(() => {
+    return () => {
+      if (modalCalcStatusTimeoutRef.current) {
+        clearTimeout(modalCalcStatusTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  function clearModalCalcStatusTimeout() {
+    if (!modalCalcStatusTimeoutRef.current) {
+      return;
+    }
+    clearTimeout(modalCalcStatusTimeoutRef.current);
+    modalCalcStatusTimeoutRef.current = null;
+  }
+
+  function setModalCalcStatusWithTimeout(message, timeoutMs = 1600) {
+    clearModalCalcStatusTimeout();
+    setModalCalcStatus(message);
+    if (timeoutMs > 0) {
+      modalCalcStatusTimeoutRef.current = setTimeout(() => {
+        setModalCalcStatus("");
+        modalCalcStatusTimeoutRef.current = null;
+      }, timeoutMs);
+    }
+  }
+
   function buildSearchParams({
     filtersValue = filters,
     enabledValue = enabled,
@@ -418,6 +544,7 @@ export default function Page() {
     if (enabledValue.player) {
       if (filtersValue.player) params.set("player", filtersValue.player);
       if (filtersValue.playerId) params.set("playerId", filtersValue.playerId);
+      if (filtersValue.pid) params.set("pid", filtersValue.pid);
       if (filtersValue.opponent) params.set("opponent", filtersValue.opponent);
       if (filtersValue.minRank) {
         params.set("minRank", filtersValue.minRank);
@@ -427,7 +554,9 @@ export default function Page() {
     if (enabledValue.matchup) {
       if (filtersValue.packA) params.set("packA", filtersValue.packA);
       if (filtersValue.packB) params.set("packB", filtersValue.packB);
-      if (filtersValue.mirrorMatch) params.set("mirrorMatch", "true");
+      if (filtersValue.winningPack) params.set("winningPack", filtersValue.winningPack);
+      if (filtersValue.losingPack) params.set("losingPack", filtersValue.losingPack);
+      if (filtersValue.excludeMirrors) params.set("excludeMirrors", "true");
     }
     if (enabledValue.pets) {
       if (selectedPetsValue.length) params.set("pet", selectedPetsValue.join(","));
@@ -441,9 +570,16 @@ export default function Page() {
       if (selectedToysValue.length) params.set("toy", selectedToysValue.join(","));
       params.set("toyMode", filtersValue.toyMode);
     }
-    if (enabledValue.turn && filtersValue.turn) params.set("turn", filtersValue.turn);
+    if (enabledValue.turn) {
+      if (filtersValue.turn) params.set("turn", filtersValue.turn);
+      if (filtersValue.minTurn) params.set("minTurn", filtersValue.minTurn);
+      if (filtersValue.maxTurn) params.set("maxTurn", filtersValue.maxTurn);
+    }
     if (enabledValue.matchType && filtersValue.matchType && filtersValue.matchType !== "any") {
       params.set("matchType", filtersValue.matchType);
+    }
+    if (filtersValue.version) {
+      params.set("version", filtersValue.version);
     }
 
     if (advancedEnabledValue) {
@@ -506,17 +642,21 @@ export default function Page() {
 
     assignText("player");
     assignText("playerId");
+    assignText("pid");
     assignText("opponent");
     assignText("minRank");
     assignText("minRankMode");
     assignText("packA");
     assignText("packB");
+    assignText("winningPack");
+    assignText("losingPack");
     assignText("excludeA");
     assignText("excludeB");
     assignText("petMode");
     assignText("perkMode");
     assignText("toyMode");
     assignText("matchType");
+    assignText("version");
     assignText("petLevelName");
     assignText("petLevelMin");
     assignText("exactTeam");
@@ -534,11 +674,13 @@ export default function Page() {
     assignText("endDate");
     assignText("tags");
     assignText("turn");
+    assignText("minTurn");
+    assignText("maxTurn");
     assignText("sort");
     assignText("order");
     assignText("pageSize");
 
-    nextFilters.mirrorMatch = urlParams.get("mirrorMatch") === "true";
+    nextFilters.excludeMirrors = urlParams.get("excludeMirrors") === "true";
 
     const nextSelectedPets = parseCsvList(urlParams.get("pet"));
     const nextSelectedPerks = parseCsvList(urlParams.get("perk"));
@@ -550,15 +692,15 @@ export default function Page() {
         if (key in nextEnabled) nextEnabled[key] = true;
       }
     } else {
-      nextEnabled.player = Boolean(nextFilters.player || nextFilters.playerId || nextFilters.opponent || nextFilters.minRank);
-      nextEnabled.matchup = Boolean(nextFilters.packA || nextFilters.packB || nextFilters.mirrorMatch);
+      nextEnabled.player = Boolean(nextFilters.player || nextFilters.playerId || nextFilters.pid || nextFilters.opponent || nextFilters.minRank);
+      nextEnabled.matchup = Boolean(nextFilters.packA || nextFilters.packB || nextFilters.winningPack || nextFilters.losingPack || nextFilters.excludeMirrors);
       nextEnabled.pets = Boolean(nextSelectedPets.length);
       nextEnabled.perks = Boolean(nextSelectedPerks.length);
       nextEnabled.toys = Boolean(nextSelectedToys.length);
-      nextEnabled.turn = Boolean(nextFilters.turn);
+      nextEnabled.turn = Boolean(nextFilters.turn || nextFilters.minTurn || nextFilters.maxTurn);
       nextEnabled.matchType = Boolean(nextFilters.matchType && nextFilters.matchType !== "any");
     }
-    if (nextFilters.mirrorMatch) {
+    if (nextFilters.excludeMirrors) {
       nextEnabled.matchup = true;
     }
 
@@ -612,12 +754,12 @@ export default function Page() {
     setEnabled((prev) => {
       const next = { ...prev, [key]: !prev[key] };
         if (!next[key]) {
-        if (key === "player") setFilters((f) => ({ ...f, player: "", playerId: "", opponent: "", minRank: "", minRankMode: "any" }));
-        if (key === "matchup") setFilters((f) => ({ ...f, packA: "", packB: "", mirrorMatch: false }));
+        if (key === "player") setFilters((f) => ({ ...f, player: "", playerId: "", pid: "", opponent: "", minRank: "", minRankMode: "any" }));
+        if (key === "matchup") setFilters((f) => ({ ...f, packA: "", packB: "", winningPack: "", losingPack: "", excludeMirrors: false }));
         if (key === "pets") setSelectedPets([]);
         if (key === "perks") setSelectedPerks([]);
         if (key === "toys") setSelectedToys([]);
-        if (key === "turn") setFilters((f) => ({ ...f, turn: "" }));
+        if (key === "turn") setFilters((f) => ({ ...f, turn: "", minTurn: "", maxTurn: "" }));
         if (key === "matchType") setFilters((f) => ({ ...f, matchType: "any" }));
       }
       return next;
@@ -702,7 +844,7 @@ export default function Page() {
     }
 
     setIngestStatus(
-      `Uploaded ${inserted}, skipped by PID ${skippedParticipation}, skipped by Game ID ${skippedMatch}, failed ${failed}`
+      `Uploaded ${inserted}, already uploaded ${skippedParticipation}, uploaded from other perspective ${skippedMatch}, failed ${failed}`
     );
     setIngestSummary({
       inserted,
@@ -769,7 +911,10 @@ export default function Page() {
   function switchExploreView(nextView) {
     const normalized = nextView === "list" ? "list" : "card";
     setExploreViewMode(normalized);
-    runSearch(null, 1, { exploreViewValue: normalized });
+    const params = new URLSearchParams(window.location.search);
+    params.set("uiView", normalized);
+    const nextUrl = params.toString() ? `?${params.toString()}` : window.location.pathname;
+    window.history.replaceState({}, "", nextUrl);
   }
 
   async function copyShareLink() {
@@ -785,7 +930,6 @@ export default function Page() {
   }
 
   useEffect(() => {
-    if (exploreViewMode !== "list") return;
     const node = listSentinelRef.current;
     if (!node) return;
 
@@ -795,14 +939,14 @@ export default function Page() {
         if (!entry?.isIntersecting) return;
         if (searchLoading) return;
         if (results.length >= total) return;
-        runSearch(null, page + 1, { append: true, exploreViewValue: "list" });
+        runSearch(null, page + 1, { append: true });
       },
       { root: null, rootMargin: "240px 0px", threshold: 0.01 }
     );
 
     observer.observe(node);
     return () => observer.disconnect();
-  }, [exploreViewMode, results.length, total, page, searchLoading]);
+  }, [results.length, total, page, searchLoading]);
 
   function syncReplayParam(replayId) {
     const params = new URLSearchParams(window.location.search);
@@ -817,6 +961,10 @@ export default function Page() {
 
   function closeModal() {
     setModalOpen(false);
+    setModalCalcLoading(false);
+    setModalCalcHover(null);
+    clearModalCalcStatusTimeout();
+    setModalCalcStatus("");
     syncReplayParam(null);
   }
 
@@ -834,13 +982,16 @@ export default function Page() {
     }
   }
 
-  async function copyReplayJsonCode() {
-    const participationId = modalData?.replay?.participation_id;
-    if (!participationId) return;
+  async function copyReplayCode(participationId, sideLabel = "Replay") {
+    if (!participationId) {
+      setModalShareStatus(`${sideLabel} code unavailable.`);
+      setTimeout(() => setModalShareStatus(""), 1400);
+      return;
+    }
     try {
       const payload = JSON.stringify({ T: 1, Pid: participationId });
       await navigator.clipboard.writeText(payload);
-      setModalShareStatus("Replay code copied.");
+      setModalShareStatus(`${sideLabel} code copied.`);
       setTimeout(() => setModalShareStatus(""), 1400);
     } catch {
       setModalShareStatus("Could not copy replay code.");
@@ -873,9 +1024,9 @@ export default function Page() {
       nextFilters.matchType = "arena";
     }
 
-    if (name === "mirror") {
+    if (name === "no-mirror") {
       nextEnabled.matchup = true;
-      nextFilters.mirrorMatch = true;
+      nextFilters.excludeMirrors = true;
     }
 
     setFilters(nextFilters);
@@ -905,6 +1056,10 @@ export default function Page() {
     setModalLoading(true);
     setModalData(null);
     setModalShareStatus("");
+    clearModalCalcStatusTimeout();
+    setModalCalcStatus("");
+    setModalCalcLoading(false);
+    setModalCalcHover(null);
     try {
       const res = await fetch(`/api/replays/${replayId}`);
       const data = await res.json();
@@ -918,6 +1073,119 @@ export default function Page() {
     } finally {
       setModalLoading(false);
     }
+  }
+
+  function turnFromModalImageClick(event) {
+    const match = getModalImageTurnMatch(event.currentTarget, event.clientY);
+    return match ? match.turn : null;
+  }
+
+  function getModalImageTurnMatch(image, clientY) {
+    const turnCount = Number(modalData?.stats?.turns || 0);
+    if (!Number.isFinite(turnCount) || turnCount <= 0) {
+      return null;
+    }
+
+    const rect = image.getBoundingClientRect();
+    if (!rect.height) {
+      return null;
+    }
+
+    const clickY = clientY - rect.top;
+    const renderedY = Math.max(0, Math.min(rect.height, clickY));
+    const naturalHeight = image.naturalHeight || rect.height;
+    const imageY = (renderedY / rect.height) * naturalHeight;
+    const inferredHeaderHeight = naturalHeight - turnCount * REPLAY_IMAGE_ROW_HEIGHT;
+    const headerHeight = Number.isFinite(inferredHeaderHeight)
+      ? Math.max(0, Math.min(REPLAY_IMAGE_HEADER_HEIGHT, inferredHeaderHeight))
+      : 0;
+
+    if (imageY < headerHeight) {
+      return null;
+    }
+
+    const turn = Math.floor((imageY - headerHeight) / REPLAY_IMAGE_ROW_HEIGHT) + 1;
+    if (!Number.isFinite(turn) || turn < 1 || turn > turnCount) {
+      return null;
+    }
+
+    const scale = rect.height / naturalHeight;
+    const renderedHeaderHeight = headerHeight * scale;
+    const renderedRowHeight = REPLAY_IMAGE_ROW_HEIGHT * scale;
+    return {
+      turn,
+      top: renderedHeaderHeight + (turn - 1) * renderedRowHeight,
+      height: renderedRowHeight
+    };
+  }
+
+  async function openCalculatorForTurn(turn) {
+    if (!modalData?.replay?.id || !Number.isFinite(turn) || turn < 1) {
+      return;
+    }
+    if (modalCalcLoading) {
+      return;
+    }
+
+    const popup = window.open("", "_blank");
+    if (!popup) {
+      setModalCalcStatusWithTimeout("Popup blocked. Allow popups to open SAP Calculator.", 2500);
+      return;
+    }
+
+    setModalCalcLoading(true);
+    setModalCalcStatusWithTimeout(`Loading SAP Calculator for turn ${turn}...`, 0);
+
+    try {
+      const res = await fetch(`/api/replays/${modalData.replay.id}/calculator?turn=${turn}`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.url) {
+        popup.close();
+        setModalCalcStatusWithTimeout(data?.error || "Could not generate SAP Calculator link.", 2200);
+        return;
+      }
+
+      popup.opener = null;
+      popup.location.href = data.url;
+      setModalCalcStatusWithTimeout(`Opened SAP Calculator for turn ${turn}.`);
+    } catch {
+      popup.close();
+      setModalCalcStatusWithTimeout("Could not open SAP Calculator link.", 2200);
+    } finally {
+      setModalCalcLoading(false);
+    }
+  }
+
+  function handleModalImageClick(event) {
+    const turn = turnFromModalImageClick(event);
+    if (!turn) {
+      setModalCalcStatusWithTimeout("Click a turn row in the replay image.", 1400);
+      return;
+    }
+    openCalculatorForTurn(turn);
+  }
+
+  function handleModalImageMouseMove(event) {
+    const match = getModalImageTurnMatch(event.currentTarget, event.clientY);
+    if (!match) {
+      setModalCalcHover(null);
+      return;
+    }
+    setModalCalcHover((prev) => {
+      if (
+        prev &&
+        prev.turn === match.turn &&
+        Math.abs(prev.top - match.top) < 0.25 &&
+        Math.abs(prev.height - match.height) < 0.25
+      ) {
+        return prev;
+      }
+      return match;
+    });
+  }
+
+  function handleModalImageMouseLeave() {
+    setModalCalcHover(null);
   }
 
   useEffect(() => {
@@ -987,7 +1255,6 @@ export default function Page() {
     return Number.isFinite(activeCount) && activeCount > 2;
   };
 
-  const totalPages = Math.max(1, Math.ceil(total / Number(filters.pageSize || 10)));
   const rawPct = bulkProgress.total > 0 ? (bulkProgress.done / bulkProgress.total) * 100 : 0;
   const pulseBoost = bulkProgress.active ? Math.min(0.9, progressPulse) : 0;
   const progressPct = Math.min(100, Math.floor(rawPct + pulseBoost));
@@ -998,12 +1265,35 @@ export default function Page() {
         <Link href="/" className="nav-link active">Explorer</Link>
         <Link href="/stats" className="nav-link">Stats</Link>
         <Link href="/leaderboard" className="nav-link">Leaderboard</Link>
+        <Link href="/profile" className="nav-link">Profile</Link>
+        <Link href="/boards" className="nav-link">Boards</Link>
+        <LocalProfileMarker />
       </div>
       <header className="hero">
         <div className="hero-copy">
           <h1>Sap Library</h1>
           <p>Upload replays, explore matchups, and search by any metric you could need.</p>
         </div>
+        {showExtensionBanner && (
+          <div className="extension-banner">
+            <img className="extension-banner-logo" src="/Sprite/Pets/Chameleon.png" alt="Extension logo" />
+            <div className="extension-banner-copy">
+              <strong>Auto-upload your games</strong>
+              <p>
+                Install the extension, open the <strong>History</strong> tab in the SAP web client, and your replays
+                will upload to this database automatically.
+              </p>
+            </div>
+            <a
+              className="extension-banner-cta"
+              href={EXTENSION_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Install Extension
+            </a>
+          </div>
+        )}
       </header>
 
       <section className="section" onClick={() => setShowSortMenu(false)}>
@@ -1030,8 +1320,8 @@ export default function Page() {
           ingestSummary.failed > 0) && (
           <div className="ingest-summary">
             <div><strong>Inserted:</strong> {ingestSummary.inserted}</div>
-            <div><strong>Skipped (PID):</strong> {ingestSummary.skippedParticipation}</div>
-            <div><strong>Skipped (Game ID):</strong> {ingestSummary.skippedMatch}</div>
+            <div><strong>Skipped:</strong> This replay has already been uploaded ({ingestSummary.skippedParticipation})</div>
+            <div><strong>Skipped:</strong> Uploaded from other perspective ({ingestSummary.skippedMatch})</div>
             <div><strong>Failed:</strong> {ingestSummary.failed}</div>
           </div>
         )}
@@ -1069,15 +1359,27 @@ export default function Page() {
           <button type="button" className="ghost" onClick={() => applyExplorePreset("ranked")}>Ranked</button>
           <button type="button" className="ghost" onClick={() => applyExplorePreset("private")}>Private</button>
           <button type="button" className="ghost" onClick={() => applyExplorePreset("arena")}>Arena</button>
-          <button type="button" className="ghost" onClick={() => applyExplorePreset("mirror")}>Mirror</button>
+          <button type="button" className="ghost" onClick={() => applyExplorePreset("no-mirror")}>No Mirror</button>
         </div>
         <div className="toggles">
           <button type="button" className={enabled.player ? "toggle active" : "toggle"} onClick={() => toggleFilter("player")}>Player</button>
           <button type="button" className={enabled.matchup ? "toggle active" : "toggle"} onClick={() => toggleFilter("matchup")}>Pack Matchup</button>
-          <button type="button" className={enabled.pets ? "toggle active" : "toggle"} onClick={() => toggleFilter("pets")}>Pets</button>
-          <button type="button" className={enabled.perks ? "toggle active" : "toggle"} onClick={() => toggleFilter("perks")}>Perks</button>
-          <button type="button" className={enabled.toys ? "toggle active" : "toggle"} onClick={() => toggleFilter("toys")}>Toys</button>
-          <button type="button" className={enabled.turn ? "toggle active" : "toggle"} onClick={() => toggleFilter("turn")}>Turn</button>
+          <button type="button" className={enabled.pets ? "toggle with-icon active" : "toggle with-icon"} onClick={() => toggleFilter("pets")}>
+            <img className="toggle-icon" src="/Sprite/Pets/Turtle.png" alt="" />
+            Pets
+          </button>
+          <button type="button" className={enabled.perks ? "toggle with-icon active" : "toggle with-icon"} onClick={() => toggleFilter("perks")}>
+            <img className="toggle-icon" src="/Sprite/Food/Honey.png" alt="" />
+            Perks
+          </button>
+          <button type="button" className={enabled.toys ? "toggle with-icon active" : "toggle with-icon"} onClick={() => toggleFilter("toys")}>
+            <img className="toggle-icon" src="/Sprite/Toys/RelicFoamSword.png" alt="" />
+            Toys
+          </button>
+          <button type="button" className={enabled.turn ? "toggle with-icon active" : "toggle with-icon"} onClick={() => toggleFilter("turn")}>
+            <img className="toggle-icon" src="/hourglass-twemoji.png" alt="" />
+            Turn
+          </button>
           <button type="button" className={enabled.matchType ? "toggle active" : "toggle"} onClick={() => toggleFilter("matchType")}>Game Type</button>
           <button
             type="button"
@@ -1105,6 +1407,14 @@ export default function Page() {
                     placeholder="Player UUID"
                     value={filters.playerId}
                     onChange={(e) => setFilters({ ...filters, playerId: e.target.value })}
+                  />
+                </div>
+                <div className="field">
+                  <label>Replay Code / PID</label>
+                  <input
+                    placeholder="PID, replay JSON, or URL"
+                    value={filters.pid}
+                    onChange={(e) => setFilters({ ...filters, pid: e.target.value })}
                   />
                 </div>
                 <div className="field">
@@ -1166,13 +1476,41 @@ export default function Page() {
                   </select>
                 </div>
                 <div className="field">
-                  <label>Mirror Match</label>
+                  <label>Exclude Mirrors</label>
                   <select
-                    value={filters.mirrorMatch ? "yes" : "no"}
-                    onChange={(e) => setFilters({ ...filters, mirrorMatch: e.target.value === "yes" })}
+                    value={filters.excludeMirrors ? "yes" : "no"}
+                    onChange={(e) => setFilters({ ...filters, excludeMirrors: e.target.value === "yes" })}
                   >
                     <option value="no">No</option>
                     <option value="yes">Yes</option>
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Winning Pack</label>
+                  <select
+                    value={filters.winningPack}
+                    onChange={(e) => setFilters({ ...filters, winningPack: e.target.value })}
+                  >
+                    <option value="">Any</option>
+                    {meta.packs.map((pack) => (
+                      <option key={`win-${pack.id}`} value={pack.name}>
+                        {pack.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Losing Pack</label>
+                  <select
+                    value={filters.losingPack}
+                    onChange={(e) => setFilters({ ...filters, losingPack: e.target.value })}
+                  >
+                    <option value="">Any</option>
+                    {meta.packs.map((pack) => (
+                      <option key={`lose-${pack.id}`} value={pack.name}>
+                        {pack.name}
+                      </option>
+                    ))}
                   </select>
                 </div>
               </>
@@ -1241,14 +1579,32 @@ export default function Page() {
               </>
             )}
             {enabled.turn && (
-              <div className="field">
-                <label>Turn</label>
-                <input
-                  placeholder="Turn"
-                  value={filters.turn}
-                  onChange={(e) => setFilters({ ...filters, turn: e.target.value })}
-                />
-              </div>
+              <>
+                <div className="field">
+                  <label>Turn</label>
+                  <input
+                    placeholder="Exact turn"
+                    value={filters.turn}
+                    onChange={(e) => setFilters({ ...filters, turn: e.target.value })}
+                  />
+                </div>
+                <div className="field">
+                  <label>Min Turn</label>
+                  <input
+                    placeholder="1"
+                    value={filters.minTurn}
+                    onChange={(e) => setFilters({ ...filters, minTurn: e.target.value })}
+                  />
+                </div>
+                <div className="field">
+                  <label>Max Turn</label>
+                  <input
+                    placeholder="15"
+                    value={filters.maxTurn}
+                    onChange={(e) => setFilters({ ...filters, maxTurn: e.target.value })}
+                  />
+                </div>
+              </>
             )}
             {enabled.matchType && (
               <div className="field">
@@ -1261,10 +1617,27 @@ export default function Page() {
                   <option value="ranked">Ranked</option>
                   <option value="arena">Arena</option>
                   <option value="private">Private</option>
-                  <option value="unknown">Unknown</option>
                 </select>
               </div>
             )}
+            <div className="field">
+              <label>Version</label>
+              <select
+                value={filters.version}
+                onChange={(e) => setFilters({ ...filters, version: e.target.value })}
+              >
+                <option value="current">
+                  Current
+                  {meta.currentVersion ? ` (${meta.currentVersion})` : ""}
+                </option>
+                <option value="all">All Versions</option>
+                {(meta.versions || []).map((version) => (
+                  <option key={version} value={version}>
+                    {version}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {advancedEnabled && (
@@ -1499,10 +1872,25 @@ export default function Page() {
             const worldOpponent = isArena(r.match_type) || isMulti(r);
             const playerWon = Number(r.last_outcome) === 1;
             const opponentWon = Number(r.last_outcome) === 2;
+            const summitGame = hasSummitTag(r.tags);
+            const summitClass = summitGame ? "summit-highlight" : "";
+            const replayPlayerId = String(r.player_id || "").toLowerCase();
+            const replayOpponentId = String(r.opponent_id || "").toLowerCase();
+            const profileFeatured = Boolean(localProfileId) && (
+              localProfileId === replayPlayerId || localProfileId === replayOpponentId
+            );
+            const profileFeaturedClass = profileFeatured ? "profile-featured" : "";
+            const gameTypeLabel = summitGame ? "SUMMIT" : (r.match_type || "unknown").toUpperCase();
+            const gameTypeIcon = summitGame ? "/Sprite/OutlinedTrophy.png" : getGameTypeIcon(r.match_type);
+            const rawGameType = (r.match_type || "unknown").toLowerCase();
+            const playerPackClass = playerWon ? "winner-pack" : opponentWon ? "loser-pack" : "";
+            const opponentPackClass = opponentWon ? "winner-pack" : playerWon ? "loser-pack" : "";
+            const playerMatchupClass = `pack-name-inline matchup-pack ${playerPackClass}`.trim();
+            const opponentMatchupClass = `pack-name-inline matchup-pack ${opponentPackClass}`.trim();
 
             return exploreViewMode === "list" ? (
               <div
-                className="list-row"
+                className={`list-row ${summitClass} ${profileFeaturedClass}`.trim()}
                 key={r.id}
                 role="button"
                 tabIndex={0}
@@ -1519,11 +1907,11 @@ export default function Page() {
 
                 <div className="list-matchup-col">
                   <div className="list-pack-line">
-                    <span className={`pack-pill ${playerWon ? "winner-pack" : ""}`}>{r.pack || "Unknown"}</span>
+                    <PackInlineName name={r.pack} className={`pack-pill ${playerPackClass}`.trim()} />
                     <span className="vs-line">vs</span>
-                    <span className={`pack-pill ${opponentWon ? "winner-pack" : ""}`}>{r.opponent_pack || "Unknown"}</span>
+                    <PackInlineName name={r.opponent_pack} className={`pack-pill ${opponentPackClass}`.trim()} />
                   </div>
-                  <div className="list-matchup-sub">{(r.match_type || "unknown").toUpperCase()}</div>
+                  <div className="list-matchup-sub">{gameTypeLabel}</div>
                 </div>
 
                 <div className={`list-player list-player-right ${opponentWon ? "winner-side" : ""}`}>
@@ -1539,7 +1927,7 @@ export default function Page() {
                 </div>
               </div>
             ) : (
-              <div className="card" key={r.id} role="button" tabIndex={0} onClick={() => openModal(r.id)} onKeyDown={(e) => e.key === "Enter" && openModal(r.id)}>
+              <div className={`card ${summitClass} ${profileFeaturedClass}`.trim()} key={r.id} role="button" tabIndex={0} onClick={() => openModal(r.id)} onKeyDown={(e) => e.key === "Enter" && openModal(r.id)}>
                 <div className="card-head">
                   <h3>
                     <span className="name-line winner-line">
@@ -1561,26 +1949,43 @@ export default function Page() {
                   </h3>
                   <div className="game-type">
                     <img
-                      src={getGameTypeIcon(r.match_type)}
-                      alt={r.match_type || "Unknown"}
+                      src={gameTypeIcon}
+                      alt={gameTypeLabel}
                       style={{
                         transform:
-                          (r.match_type || "unknown").toLowerCase() === "private"
+                          !summitGame && rawGameType === "private"
                             ? "scaleX(-1)"
-                            : (r.match_type || "unknown").toLowerCase() === "ranked"
+                            : !summitGame && rawGameType === "ranked"
                               ? "scale(1.15)"
                               : "none"
                       }}
                     />
                     <span
                       className="game-type-label"
-                      style={{ fontSize: (r.match_type || "unknown").length > 6 ? "10px" : "11px" }}
+                      style={{ fontSize: gameTypeLabel.length > 6 ? "10px" : "11px" }}
                     >
-                      {(r.match_type || "unknown").toUpperCase()}
+                      {gameTypeLabel}
                     </span>
                   </div>
                 </div>
-                <div className="muted">Matchup: {r.pack || "Unknown"} vs {r.opponent_pack || "Unknown"}</div>
+                <div className="muted matchup-line">
+                  <span>Matchup:</span>
+                  <PackMatchupInline
+                    pack={r.pack}
+                    opponentPack={r.opponent_pack}
+                    leftClassName={playerMatchupClass}
+                    rightClassName={opponentMatchupClass}
+                  />
+                </div>
+                <div className="muted card-meta-line">
+                  <span>Rank {r.player_rank ?? "?"}</span>
+                  <span>vs</span>
+                  <span>{worldOpponent ? "The World" : `Rank ${r.opponent_rank ?? "?"}`}</span>
+                  <span>•</span>
+                  <span>v{r.game_version || "?"}</span>
+                  <span>•</span>
+                  <span>{r.created_at ? new Date(r.created_at).toLocaleDateString() : ""}</span>
+                </div>
                 <div className="replay-image-wrap">
                   <img
                     className="replay-image"
@@ -1594,19 +1999,11 @@ export default function Page() {
             );
           })}
         </div>
-        {exploreViewMode === "list" ? (
-          <div className="infinite-footer">
-            <div className="page-info">{results.length} / {total}</div>
-            <div ref={listSentinelRef} className="list-sentinel" />
-            {searchLoading && results.length < total ? <div className="muted">Loading more...</div> : null}
-          </div>
-        ) : (
-          <div className="pagination">
-            <button disabled={page <= 1 || searchLoading} onClick={() => runSearch(null, page - 1)}>Prev</button>
-            <div className="page-info">Page {page} / {totalPages}</div>
-            <button disabled={page >= totalPages || searchLoading} onClick={() => runSearch(null, page + 1)}>Next</button>
-          </div>
-        )}
+        <div className="infinite-footer">
+          <div className="page-info">{results.length} / {total}</div>
+          <div ref={listSentinelRef} className="list-sentinel" />
+          {searchLoading && results.length < total ? <div className="muted">Loading more...</div> : null}
+        </div>
       </section>
 
       {modalOpen && (
@@ -1616,19 +2013,45 @@ export default function Page() {
               <h3>Replay Details</h3>
               <div className="modal-head-actions">
                 <button className="ghost" type="button" onClick={copyReplayShareLink}>Share</button>
-                <button className="ghost" type="button" onClick={copyReplayJsonCode}>Copy Replay Code</button>
+                <button
+                  className="ghost"
+                  type="button"
+                  onClick={() => copyReplayCode(modalData?.replay?.participation_id, "Player 1")}
+                >
+                  Copy P1 Code
+                </button>
+                <button
+                  className="ghost"
+                  type="button"
+                  onClick={() => copyReplayCode(modalData?.replay?.opponent_participation_id, "Player 2")}
+                >
+                  Copy P2 Code
+                </button>
                 <button className="ghost" type="button" onClick={closeModal}>Close</button>
               </div>
             </div>
             {modalShareStatus ? <div className="status">{modalShareStatus}</div> : null}
+            {modalCalcStatus ? <div className="status">{modalCalcStatus}</div> : null}
             {modalLoading && <div className="muted">Loading...</div>}
             {!modalLoading && modalData?.error && <div className="muted">{modalData.error}</div>}
             {!modalLoading && modalData?.replay && (
               <>
                 <div className="modal-grid">
-                  <div><span className="label">Matchup</span><span>{modalData.replay.pack || "Unknown"} vs {modalData.replay.opponent_pack || "Unknown"}</span></div>
-                  <div><span className="label">Game Type</span><span>{(modalData.replay.match_type || "unknown").toUpperCase()}</span></div>
+                  <div>
+                    <span className="label">Matchup</span>
+                    <span>
+                      <PackMatchupInline
+                        pack={modalData.replay.pack}
+                        opponentPack={modalData.replay.opponent_pack}
+                      />
+                    </span>
+                  </div>
+                  <div><span className="label">Game Type</span><span>{hasSummitTag(modalData.replay.tags) ? "SUMMIT" : (modalData.replay.match_type || "unknown").toUpperCase()}</span></div>
                   <div><span className="label">Version</span><span>{modalData.replay.game_version || "?"}</span></div>
+                  <div>
+                    <span className="label">Played</span>
+                    <span>{modalData.replay.created_at ? new Date(modalData.replay.created_at).toLocaleString() : "?"}</span>
+                  </div>
                   <div><span className="label">Participation</span><span>{modalData.replay.participation_id}</span></div>
                   <div><span className="label">Turns</span><span>{modalData.stats?.turns ?? "?"}</span></div>
                   <div><span className="label">Max Lives</span><span>{modalData.replay.max_lives ?? "?"}</span></div>
@@ -1680,8 +2103,18 @@ export default function Page() {
                       </button>
                     </h4>
                     <div className="stat">
+                      <span className="label">Replay Code</span>
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={() => copyReplayCode(modalData.replay.participation_id, "Player 1")}
+                      >
+                        Copy
+                      </button>
+                    </div>
+                    <div className="stat">
                       <span className="label">Rank</span>
-                      <span>{modalData.replay.player_rank ?? "?"}</span>
+                      <span>{modalData.replay.player_rank_display ?? modalData.replay.player_rank ?? "?"}</span>
                     </div>
                     <div className="stat" onClick={maybeUnlockTags} role="button" tabIndex={0} onKeyDown={(e) => e.key === "Enter" && maybeUnlockTags(e)}>
                       <span className="label">Gold Spent</span>
@@ -1702,8 +2135,18 @@ export default function Page() {
                         </button>
                       </h4>
                       <div className="stat">
+                        <span className="label">Replay Code</span>
+                        <button
+                          type="button"
+                          className="ghost"
+                          onClick={() => copyReplayCode(modalData.replay.opponent_participation_id, "Player 2")}
+                        >
+                          Copy
+                        </button>
+                      </div>
+                      <div className="stat">
                         <span className="label">Rank</span>
-                        <span>{modalData.replay.opponent_rank ?? "?"}</span>
+                        <span>{modalData.replay.opponent_rank_display ?? modalData.replay.opponent_rank ?? "?"}</span>
                       </div>
                       <div className="stat" onClick={maybeUnlockTags} role="button" tabIndex={0} onKeyDown={(e) => e.key === "Enter" && maybeUnlockTags(e)}>
                         <span className="label">Gold Spent</span>
@@ -1713,11 +2156,24 @@ export default function Page() {
                     </div>
                   )}
                 </div>
-                <img
-                  className="modal-image"
-                  src={`/api/replays/${modalData.replay.id}/image?v=${encodeURIComponent(modalData.replay.created_at || replayImageVersion)}`}
-                  alt="Replay"
-                />
+                <div className="modal-image-helper">Hover and click a turn row to open SAP Calculator for that turn.</div>
+                <div className="modal-image-wrap-interactive">
+                  <img
+                    className={`modal-image modal-image-clickable ${modalCalcLoading ? "modal-image-loading" : ""}`}
+                    src={`/api/replays/${modalData.replay.id}/image?v=${encodeURIComponent(modalData.replay.created_at || replayImageVersion)}`}
+                    alt="Replay"
+                    title="Click a turn row to open SAP Calculator"
+                    onClick={handleModalImageClick}
+                    onMouseMove={handleModalImageMouseMove}
+                    onMouseLeave={handleModalImageMouseLeave}
+                  />
+                  {modalCalcHover ? (
+                    <div
+                      className="modal-turn-hover"
+                      style={{ top: `${modalCalcHover.top}px`, height: `${modalCalcHover.height}px` }}
+                    />
+                  ) : null}
+                </div>
               </>
             )}
           </div>
