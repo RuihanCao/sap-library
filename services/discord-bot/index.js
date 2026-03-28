@@ -21,6 +21,11 @@ const {
   deleteDiscordIngestChannel
 } = require("./channel-config");
 
+const WATCH_EVENT_TYPE_CHOICES = [
+  { name: "Mini", value: "mini" },
+  { name: "Major", value: "major" }
+];
+
 const BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
 const APPLICATION_ID = process.env.DISCORD_APPLICATION_ID;
 const GUILD_ID = process.env.DISCORD_GUILD_ID || "";
@@ -92,8 +97,15 @@ const commands = [
     .setDescription("Enable replay auto-ingest in this channel")
     .addStringOption((option) =>
       option
-        .setName("tournament")
-        .setDescription("Tournament tag name (ex: summit-9)")
+        .setName("event_type")
+        .setDescription("Whether this watched channel is for a mini or major")
+        .setRequired(true)
+        .addChoices(...WATCH_EVENT_TYPE_CHOICES)
+    )
+    .addStringOption((option) =>
+      option
+        .setName("cycle")
+        .setDescription("Cycle tag (ex: fuji)")
         .setRequired(true)
     )
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
@@ -117,13 +129,43 @@ function normalizeTagToken(value) {
     .replace(/\s+/g, "-");
 }
 
-function getTournamentCompanionTags(tournamentTag) {
+function parseStructuredTournamentTag(tournamentTag) {
   const normalizedTournament = normalizeTagToken(tournamentTag);
-  if (!normalizedTournament) return [];
-  if (normalizedTournament.startsWith("fuji-mini-")) {
-    return ["summit", "mini", "fuji"];
+  if (!normalizedTournament) return null;
+  const match = normalizedTournament.match(/^(.+?)-(mini|major)(?:-(.+))?$/);
+  if (!match) return null;
+  return {
+    tournamentTag: normalizedTournament,
+    cycleTag: match[1],
+    eventType: match[2],
+    suffix: match[3] || null
+  };
+}
+
+function buildTournamentTag(cycleTag, eventType) {
+  const normalizedCycle = normalizeTagToken(cycleTag);
+  const normalizedEventType = normalizeTagToken(eventType);
+  if (!normalizedCycle) return null;
+  if (!WATCH_EVENT_TYPE_CHOICES.some((choice) => choice.value === normalizedEventType)) {
+    return null;
+  }
+  return `${normalizedCycle}-${normalizedEventType}`;
+}
+
+function getTournamentCompanionTags(tournamentTag) {
+  const parsedTournament = parseStructuredTournamentTag(tournamentTag);
+  if (parsedTournament) {
+    return ["summit", parsedTournament.eventType, parsedTournament.cycleTag];
   }
   return [];
+}
+
+function formatWatchedChannelSummary(channelId, tournamentTag) {
+  const parsedTournament = parseStructuredTournamentTag(tournamentTag);
+  if (!parsedTournament) {
+    return `<#${channelId}> (tournament:${tournamentTag || "unset"})`;
+  }
+  return `<#${channelId}> (tournament:${parsedTournament.tournamentTag}, type:${parsedTournament.eventType}, cycle:${parsedTournament.cycleTag})`;
 }
 
 function buildBotTags(interaction, options) {
@@ -167,8 +209,8 @@ function buildAutoIngestTags(message, tournamentTag) {
     tags.push(normalizedTournament);
     tags.push(...getTournamentCompanionTags(normalizedTournament));
   } else {
-    // Legacy fallback for static env channels that don't have DB watcher config.
-    tags.push("summit", "mini", "fuji");
+    // Legacy fallback for watched channels that do not have structured tournament config yet.
+    tags.push("summit", "major", "fuji");
   }
 
   return Array.from(new Set(tags.map((tag) => normalizeTagToken(tag)).filter(Boolean)));
@@ -325,11 +367,12 @@ async function handleWatchHere(interaction) {
     return;
   }
 
-  const tournamentInput = interaction.options.getString("tournament", true);
-  const tournamentTag = normalizeTagToken(tournamentInput);
+  const eventType = interaction.options.getString("event_type", true);
+  const cycleInput = interaction.options.getString("cycle", true);
+  const tournamentTag = buildTournamentTag(cycleInput, eventType);
   if (!tournamentTag) {
     await interaction.reply({
-      content: "Tournament name is required.",
+      content: "A valid event type and cycle tag are required.",
       ephemeral: true
     });
     return;
@@ -344,7 +387,7 @@ async function handleWatchHere(interaction) {
   addWatchedChannel(interaction.guildId, interaction.channelId, tournamentTag);
 
   await interaction.reply({
-    content: `Auto-ingest enabled for <#${interaction.channelId}> with tournament:${tournamentTag}.`,
+    content: `Auto-ingest enabled for <#${interaction.channelId}> with tournament:${tournamentTag}, type:${normalizeTagToken(eventType)}, cycle:${normalizeTagToken(cycleInput)}.`,
     ephemeral: true
   });
 }
@@ -415,7 +458,7 @@ async function handleWatchList(interaction) {
 
   await interaction.reply({
     content: `DB watched channels: ${configuredList
-      .map(([channelId, tournamentTag]) => `<#${channelId}> (tournament:${tournamentTag || "unset"})`)
+      .map(([channelId, tournamentTag]) => formatWatchedChannelSummary(channelId, tournamentTag))
       .join(", ")}\n${staticList}`,
     ephemeral: true
   });

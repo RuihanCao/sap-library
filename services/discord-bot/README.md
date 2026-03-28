@@ -6,7 +6,7 @@ This bot uploads SAP replays from Discord slash commands and tags them in the sa
 
 - `/sap-ping`
 - `/sap-upload participation_id:<id|url|payload> tournament:<optional> player:<optional> set:<optional> tags:<optional csv>`
-- `/sap-watch-here tournament:<required>` (admin: enable auto-ingest in the current channel)
+- `/sap-watch-here event_type:<mini|major> cycle:<required>` (admin: enable auto-ingest in the current channel)
 - `/sap-unwatch-here` (admin: disable auto-ingest in the current channel)
 - `/sap-watch-list` (admin: list watched channels in this server)
 
@@ -16,10 +16,10 @@ This bot uploads SAP replays from Discord slash commands and tags them in the sa
 3. Apply tags to the replay, including Discord source metadata.
 
 Auto-ingest behavior:
-1. Run `/sap-watch-here tournament:<name>` in a channel you want to monitor.
+1. Run `/sap-watch-here event_type:<mini|major> cycle:<tag>` in a channel you want to monitor.
 2. Any message in that channel containing a replay UUID/URL/payload will be ingested.
-3. The bot auto-tags the replay with: `tournament:<name>`, `<name>`, and Discord source metadata.
-4. For `fuji-mini-*` tournaments, it also adds: `summit`, `mini`, and `fuji`.
+3. The bot derives a tournament tag in the format `<cycle>-<event_type>`.
+4. The bot auto-tags the replay with: `tournament:<cycle>-<event_type>`, `<cycle>-<event_type>`, `summit`, `<event_type>`, `<cycle>`, and Discord source metadata.
 
 ## Required env vars
 
