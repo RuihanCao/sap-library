@@ -2,6 +2,8 @@
 
 This file documents the HTTP endpoints currently implemented under `app/api`.
 
+It also includes a short appendix for external Teamwood endpoints that this project integrates with or has verified during testing.
+
 ## Conventions
 
 - Base path: `/api`
@@ -742,4 +744,118 @@ Response shape:
   "board": {},
   "matchups": []
 }
+```
+
+## External Teamwood Endpoints
+
+These are not routes implemented in this repo. They are external Teamwood/Super Auto Pets API endpoints that have been verified during integration work.
+
+Verification date:
+
+- `2026-05-15`
+
+### `POST https://api.teamwood.games/0.{version}/api/user/login`
+
+Used to authenticate against Teamwood.
+
+Request body:
+
+```json
+{
+  "Email": "user@example.com",
+  "Password": "password",
+  "Version": "47"
+}
+```
+
+Observed response keys:
+
+- `Claims`
+- `DeviceId`
+- `Email`
+- `ExpiresOn`
+- `Guest`
+- `RefreshToken`
+- `Token`
+
+Notes:
+
+- Returns a bearer token in `Token`
+- Also returns a `RefreshToken`
+- Used by [lib/teamwood.js](C:/Users/porte/Downloads/sap-replay-bot-main/sap-replay-bot-main/lib/teamwood.js:64)
+
+### `POST https://api.teamwood.games/0.{version}/api/playback/participation`
+
+Fetches a replay by participation id.
+
+Request headers:
+
+- `Authorization: Bearer <token>`
+
+Request body:
+
+```json
+{
+  "ParticipationId": "uuid",
+  "Turn": 1,
+  "Version": "47"
+}
+```
+
+Notes:
+
+- Requires authenticated access
+- Used by [lib/sapPlayback.js](C:/Users/porte/Downloads/sap-replay-bot-main/sap-replay-bot-main/lib/sapPlayback.js:23)
+
+### `GET https://api.teamwood.games/0.{version}/api/history/fetch`
+
+Fetches account history for the authenticated user.
+
+Tested request headers:
+
+- `Authorization: Bearer <token>`
+- Optional: `refresh-token: <refresh token>`
+- Optional: `device-id: 00000000-0000-0000-0000-000000000000`
+- Optional: `language: en`
+
+Observed behavior:
+
+- `200 OK` with bearer token only
+- `200 OK` with bearer token plus refresh token
+- Response content type: `application/json; charset=utf-8`
+
+Observed response shape:
+
+```json
+{
+  "History": [],
+  "HallFame": []
+}
+```
+
+Observed non-empty `History[]` item keys:
+
+- `Id`
+- `ParticipationId`
+- `Version`
+- `Mode`
+- `Victories`
+- `Lives`
+- `Battle`
+- `CreatedOn`
+- `HallFame`
+
+Notes:
+
+- This endpoint is authenticated; it is not a public anonymous history feed
+- Replay ingestion can extract top-level `History[].ParticipationId` values and pass them through the normal replay ingest path
+- `scripts/sync-history.js` can sync either a live authenticated history response or a saved response file
+- No public Swagger/OpenAPI docs were found for Teamwood endpoints during this verification pass
+
+Example local sync commands:
+
+```bash
+npm run history:sync -- --dry-run
+npm run history:sync -- --file C:\Users\porte\Downloads\response.txt --dry-run
+npm run history:sync -- --file C:\Users\porte\Downloads\response.txt
 ```
