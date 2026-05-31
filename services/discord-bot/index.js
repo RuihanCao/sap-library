@@ -26,6 +26,10 @@ const WATCH_EVENT_TYPE_CHOICES = [
   { name: "Major", value: "major" }
 ];
 
+const SCAN_MAX_HOURS = 168;
+const SCAN_MAX_MESSAGES = 5000;
+const SCAN_FETCH_PAGE = 100;
+
 const BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
 const APPLICATION_ID = process.env.DISCORD_APPLICATION_ID;
 const GUILD_ID = process.env.DISCORD_GUILD_ID || "";
@@ -118,6 +122,25 @@ const commands = [
   new SlashCommandBuilder()
     .setName("sap-watch-list")
     .setDescription("List channels with replay auto-ingest enabled in this server")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .toJSON(),
+  new SlashCommandBuilder()
+    .setName("sap-scan")
+    .setDescription("Scan recent messages in this channel and upload/tag every replay found")
+    .addIntegerOption((option) =>
+      option
+        .setName("hours")
+        .setDescription("How many hours back to scan")
+        .setRequired(true)
+        .setMinValue(1)
+        .setMaxValue(SCAN_MAX_HOURS)
+    )
+    .addStringOption((option) =>
+      option
+        .setName("tournament")
+        .setDescription("Tournament tag override (ex: fuji-major). Defaults to this channel's watch config.")
+        .setRequired(false)
+    )
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .toJSON()
 ];
@@ -464,6 +487,132 @@ async function handleWatchList(interaction) {
   });
 }
 
+async function collectChannelMessagesSince(channel, cutoffMs) {
+  const collected = [];
+  let before;
+  while (collected.length < SCAN_MAX_MESSAGES) {
+    const batch = await channel.messages.fetch({ limit: SCAN_FETCH_PAGE, before });
+    if (!batch.size) break;
+
+    let reachedCutoff = false;
+    for (const message of batch.values()) {
+      if (message.createdTimestamp < cutoffMs) {
+        reachedCutoff = true;
+        continue;
+      }
+      collected.push(message);
+    }
+
+    before = batch.last()?.id;
+    if (reachedCutoff || !before || batch.size < SCAN_FETCH_PAGE) break;
+  }
+  return collected;
+}
+
+async function handleScan(interaction) {
+  if (!interactionGuildAllowed(interaction)) {
+    await interaction.reply({
+      content: "Scanning is not enabled in this server.",
+      ephemeral: true
+    });
+    return;
+  }
+
+  const channel = interaction.channel;
+  if (!interaction.guildId || !channel || typeof channel.messages?.fetch !== "function") {
+    await interaction.reply({
+      content: "This command can only be used in a server text channel.",
+      ephemeral: true
+    });
+    return;
+  }
+
+  const hours = interaction.options.getInteger("hours", true);
+  const tournamentOverride = interaction.options.getString("tournament") || "";
+  const cutoffMs = Date.now() - hours * 60 * 60 * 1000;
+
+  await interaction.deferReply({ ephemeral: true });
+
+  let messages;
+  try {
+    messages = await collectChannelMessagesSince(channel, cutoffMs);
+  } catch (error) {
+    console.error("sap-scan history fetch failed", error);
+    await interaction.editReply(
+      `Failed to read channel history: ${error?.message || "Unknown error"}. ` +
+      "Make sure the bot has Read Message History permission here."
+    );
+    return;
+  }
+
+  const tournamentTag = tournamentOverride
+    ? normalizeTagToken(tournamentOverride)
+    : watchedChannelTournamentTag(interaction.guildId, interaction.channelId);
+
+  // Map participation ID -> the first message it appeared in, so each replay
+  // is ingested once and tagged with its original author.
+  const targets = new Map();
+  for (const message of messages) {
+    if (message.author?.bot) continue;
+    const participationId = extractParticipationId(message.content || "");
+    if (!participationId || targets.has(participationId)) continue;
+    targets.set(participationId, message);
+  }
+
+  const total = targets.size;
+  if (!total) {
+    await interaction.editReply(
+      `Scanned ${messages.length} message(s) from the last ${hours}h — no replays found.`
+    );
+    return;
+  }
+
+  const counts = { inserted: 0, existed: 0, failed: 0 };
+  let processed = 0;
+  let lastEditAt = 0;
+
+  for (const [participationId, message] of targets) {
+    try {
+      const ingestResult = await ingestParticipationReplay(participationId);
+      if (ingestResult.status === "invalid_participation_id") {
+        counts.failed += 1;
+      } else {
+        await appendReplayTags(ingestResult.replayId, buildAutoIngestTags(message, tournamentTag), {
+          participationId: ingestResult.participationId,
+          matchId: ingestResult.matchId
+        });
+        if (ingestResult.status === "inserted") {
+          counts.inserted += 1;
+        } else {
+          counts.existed += 1;
+        }
+      }
+    } catch (error) {
+      console.error("sap-scan ingest failed", { participationId, error: error?.message || error });
+      counts.failed += 1;
+    }
+
+    processed += 1;
+    const now = Date.now();
+    if (now - lastEditAt > 4000 && processed < total) {
+      lastEditAt = now;
+      await interaction
+        .editReply(`Scanning… processed ${processed}/${total} replays.`)
+        .catch(() => {});
+    }
+  }
+
+  const tagLine = tournamentTag ? `tournament:${tournamentTag}` : "channel default tags";
+  await interaction.editReply(
+    [
+      `Scan complete for the last ${hours}h (${messages.length} message(s) read).`,
+      `Replays found: ${total}`,
+      `Uploaded: ${counts.inserted} | Already existed: ${counts.existed} | Failed: ${counts.failed}`,
+      `Tagged with: ${tagLine}`
+    ].join("\n")
+  );
+}
+
 async function main() {
   const client = new Client({
     intents: [
@@ -535,6 +684,11 @@ async function main() {
 
       if (interaction.commandName === "sap-watch-list") {
         await handleWatchList(interaction);
+        return;
+      }
+
+      if (interaction.commandName === "sap-scan") {
+        await handleScan(interaction);
         return;
       }
 

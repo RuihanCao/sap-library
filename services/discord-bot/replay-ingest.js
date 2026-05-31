@@ -12,7 +12,10 @@ function extractParticipationId(input) {
   const text = String(input).trim();
   if (!text) return null;
 
-  const uuidRegex = /[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i;
+  // Accept any UUID version/variant. SAP v48 switched participation IDs to
+  // UUIDv7 (version nibble 7, variant outside [89ab]), so the old RFC-4122
+  // restricted pattern rejected every new replay.
+  const uuidRegex = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
   if (text.startsWith("{") && text.endsWith("}")) {
     try {

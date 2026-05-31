@@ -9,7 +9,8 @@ const { parseReplay } = require("../lib/parse");
 dotenv.config({ path: path.resolve(process.cwd(), ".env.local") });
 dotenv.config();
 
-const UUID_REGEX = /[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i;
+// Accept any UUID version/variant (SAP v48 participation IDs are UUIDv7).
+const UUID_REGEX = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
 function usage() {
   console.log("Usage: node scripts/import-replay-jsons.js <directory-with-json-files> [concurrency]");

@@ -24,7 +24,8 @@ function extractParticipationId(input) {
   const text = String(input).trim();
   if (!text) return null;
 
-  const uuidRegex = /[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i;
+  // Accept any UUID version/variant (SAP v48 participation IDs are UUIDv7).
+  const uuidRegex = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
   if (text.startsWith("{") && text.endsWith("}")) {
     try {
