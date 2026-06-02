@@ -1427,12 +1427,20 @@ button:hover:not(:disabled) {
 
   .pet-turns-modal {
     width: 100%;
-    padding: 14px;
+    padding: 12px;
+  }
+
+  .pet-turns-table {
+    font-size: 11px;
   }
 
   .pet-turns-table th,
   .pet-turns-table td {
-    padding: 3px 4px;
+    padding: 2px 2px;
+  }
+
+  .pet-turns-table th {
+    font-size: 10px;
   }
 
   .form-row,
@@ -1905,7 +1913,7 @@ button:hover:not(:disabled) {
 .pet-turns-table-wrap {
   width: 100%;
   max-width: 100%;
-  overflow-x: auto;
+  overflow-x: hidden;
 }
 
 .pet-turns-table {
@@ -1918,9 +1926,8 @@ button:hover:not(:disabled) {
 .pet-turns-table th,
 .pet-turns-table td {
   text-align: right;
-  padding: 3px 6px;
+  padding: 2px 3px;
   border-bottom: 1px solid rgba(120, 130, 160, 0.12);
-  white-space: nowrap;
 }
 
 .pet-turns-table th:first-child,
@@ -1928,21 +1935,21 @@ button:hover:not(:disabled) {
   text-align: left;
 }
 
-/* Turn / Rounds columns are narrow; the three rate columns share the rest. */
+/* Turn / Rnds columns are narrow; the three rate columns share the rest. */
 .pet-turns-table th:nth-child(1),
 .pet-turns-table td:nth-child(1) {
-  width: 18%;
+  width: 15%;
 }
 
 .pet-turns-table th:nth-child(2),
 .pet-turns-table td:nth-child(2) {
-  width: 22%;
+  width: 19%;
 }
 
 .pet-turns-table th {
   font-size: 11px;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.02em;
   opacity: 0.6;
 }
 

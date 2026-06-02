@@ -2230,7 +2230,7 @@ export default function StatsPage() {
                     <thead>
                       <tr>
                         <th>Turn</th>
-                        <th>Rounds</th>
+                        <th>Rnds</th>
                         <th>Win</th>
                         <th>Loss</th>
                         <th>Draw</th>
