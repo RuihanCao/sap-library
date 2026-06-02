@@ -2225,31 +2225,33 @@ export default function StatsPage() {
                 <div className="muted">No turn data for these filters.</div>
               )}
               {!detail.loading && turns.length > 0 && (
-                <table className="pet-turns-table">
-                  <thead>
-                    <tr>
-                      <th>Turn</th>
-                      <th>Rounds</th>
-                      <th>Win</th>
-                      <th>Loss</th>
-                      <th>Draw</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {turns.map((t) => {
-                      const r = Number(t.rounds || 0);
-                      return (
-                        <tr key={t.turn_number}>
-                          <td>{t.turn_number}</td>
-                          <td>{r}</td>
-                          <td className="rate-win">{r ? formatPct(Number(t.wins || 0) / r) : "—"}</td>
-                          <td className="rate-loss">{r ? formatPct(Number(t.losses || 0) / r) : "—"}</td>
-                          <td>{r ? formatPct(Number(t.draws || 0) / r) : "—"}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                <div className="pet-turns-table-wrap">
+                  <table className="pet-turns-table">
+                    <thead>
+                      <tr>
+                        <th>Turn</th>
+                        <th>Rounds</th>
+                        <th>Win</th>
+                        <th>Loss</th>
+                        <th>Draw</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {turns.map((t) => {
+                        const r = Number(t.rounds || 0);
+                        return (
+                          <tr key={t.turn_number}>
+                            <td>{t.turn_number}</td>
+                            <td>{r}</td>
+                            <td className="rate-win">{r ? formatPct(Number(t.wins || 0) / r) : "—"}</td>
+                            <td className="rate-loss">{r ? formatPct(Number(t.losses || 0) / r) : "—"}</td>
+                            <td>{r ? formatPct(Number(t.draws || 0) / r) : "—"}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </div>
           </div>

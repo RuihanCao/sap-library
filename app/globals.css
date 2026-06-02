@@ -1425,6 +1425,16 @@ button:hover:not(:disabled) {
     padding: 12px;
   }
 
+  .pet-turns-modal {
+    width: 100%;
+    padding: 14px;
+  }
+
+  .pet-turns-table th,
+  .pet-turns-table td {
+    padding: 3px 4px;
+  }
+
   .form-row,
   .bulk {
     grid-template-columns: 1fr;
@@ -1871,6 +1881,8 @@ button:hover:not(:disabled) {
 
 .pet-turns-modal {
   width: min(440px, 100%);
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 .pet-turns-modal-title {
@@ -1879,16 +1891,26 @@ button:hover:not(:disabled) {
   gap: 10px;
   margin: 0;
   font-size: 16px;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .pet-turns-modal-title img {
   width: 28px;
   height: 28px;
+  flex: 0 0 auto;
   object-fit: contain;
+}
+
+.pet-turns-table-wrap {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 .pet-turns-table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   font-size: 12px;
 }
@@ -1896,13 +1918,25 @@ button:hover:not(:disabled) {
 .pet-turns-table th,
 .pet-turns-table td {
   text-align: right;
-  padding: 2px 6px;
+  padding: 3px 6px;
   border-bottom: 1px solid rgba(120, 130, 160, 0.12);
+  white-space: nowrap;
 }
 
 .pet-turns-table th:first-child,
 .pet-turns-table td:first-child {
   text-align: left;
+}
+
+/* Turn / Rounds columns are narrow; the three rate columns share the rest. */
+.pet-turns-table th:nth-child(1),
+.pet-turns-table td:nth-child(1) {
+  width: 18%;
+}
+
+.pet-turns-table th:nth-child(2),
+.pet-turns-table td:nth-child(2) {
+  width: 22%;
 }
 
 .pet-turns-table th {
