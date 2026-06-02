@@ -240,9 +240,12 @@ export default function StatsPage() {
     matchupStats: [],
     petStats: [],
     perkStats: [],
-    toyStats: []
+    toyStats: [],
+    tierupPetStats: []
   });
   const [loading, setLoading] = useState(false);
+  const [tierupSort, setTierupSort] = useState("games");
+  const [tierupOrder, setTierupOrder] = useState("desc");
   const [petSort, setPetSort] = useState(defaultSortForScope(DEFAULT_STATS_FILTERS.scope));
   const [petOrder, setPetOrder] = useState("desc");
   const [perkSort, setPerkSort] = useState(defaultSortForScope(DEFAULT_STATS_FILTERS.scope));
@@ -260,7 +263,8 @@ export default function StatsPage() {
     matchup: false,
     pet: false,
     perk: false,
-    toy: false
+    toy: false,
+    tierup: false
   });
   const [expandedMatchupRows, setExpandedMatchupRows] = useState({});
   const [matchupPerspectiveRows, setMatchupPerspectiveRows] = useState({});
@@ -411,7 +415,8 @@ export default function StatsPage() {
         matchupStats: data.matchupStats || [],
         petStats: data.petStats || [],
         perkStats: data.perkStats || [],
-        toyStats: data.toyStats || []
+        toyStats: data.toyStats || [],
+        tierupPetStats: data.tierupPetStats || []
       });
       setExpandedMatchupRows({});
       setMatchupPerspectiveRows({});
@@ -799,6 +804,49 @@ export default function StatsPage() {
       compareRows(a, b, toySort, toyOrder, stats.totalGames, "toy_name")
     );
   }, [filteredToyStats, stats.totalGames, toySort, toyOrder, toyMetaMap, itemPackFilter]);
+  const sortedTierupStats = useMemo(() => {
+    const minSampleValue = Number(filters.minSample);
+    const minSampleThreshold = Number.isFinite(minSampleValue) ? Math.max(0, minSampleValue) : 10;
+    const selectedPets = new Set(filters.pet || []);
+    const filtered = (stats.tierupPetStats || []).filter((row) => {
+      if (selectedPets.size && !selectedPets.has(row.pet_name)) return false;
+      const games = Number(row.games_tierup || 0);
+      return games >= minSampleThreshold || selectedPets.has(row.pet_name);
+    });
+    const withMeta = expandWithMeta(filtered, "pet_name", petMetaMap, tierupSort);
+    const direction = tierupOrder === "desc" ? -1 : 1;
+    const metric = (row) => {
+      const games = Number(row.games_tierup || 0);
+      const wins = Number(row.wins_tierup || 0);
+      const rounds = Number(row.rounds_tierup || 0);
+      const roundWins = Number(row.round_wins_tierup || 0);
+      switch (tierupSort) {
+        case "name":
+          return row.pet_name;
+        case "tier":
+          return row._tier ?? 999;
+        case "gameWinrate":
+          return games ? wins / games : 0;
+        case "turnWinrate":
+          return rounds ? roundWins / rounds : 0;
+        case "games":
+        default:
+          return games;
+      }
+    };
+    return withMeta.sort((a, b) => {
+      const av = metric(a);
+      const bv = metric(b);
+      let cmp = 0;
+      if (typeof av === "string" || typeof bv === "string") {
+        cmp = direction * String(av).localeCompare(String(bv));
+      } else {
+        cmp = direction * (Number(av) - Number(bv));
+      }
+      if (cmp !== 0) return cmp;
+      return String(a.pet_name || "").localeCompare(String(b.pet_name || ""));
+    });
+  }, [stats.tierupPetStats, filters.pet, filters.minSample, petMetaMap, tierupSort, tierupOrder, itemPackFilter]);
   useEffect(() => {
     setVisibleRows({
       pack: Math.min(STATS_INITIAL_BATCH, sortedPackStats.length),
@@ -1548,6 +1596,84 @@ export default function StatsPage() {
           </div>
         )}
         </>
+        )}
+      </section>
+
+      <section className="section">
+        <div className="results-header with-inline-filter">
+          <h2>Tierup Pets</h2>
+          <p className="section-hint">
+            Winrate when a pet is acquired ahead of its tier (first seen before turn 2·tier−1, i.e. via a level-up choice).
+            {filters.scope === "battle" ? " Switch scope to Game to view." : ""}
+          </p>
+          <div className="sort-menu" onClick={(e) => e.stopPropagation()}>
+            <div className="sort-panel" style={{ position: "static", display: "flex", gap: "8px" }}>
+              <div className="field">
+                <label>Sort</label>
+                <select value={tierupSort} onChange={(e) => setTierupSort(e.target.value)}>
+                  <option value="games">Tierup Games</option>
+                  <option value="gameWinrate">Game Winrate</option>
+                  <option value="turnWinrate">Tierup-Turn Winrate</option>
+                  <option value="tier">Tier</option>
+                  <option value="name">Name</option>
+                </select>
+              </div>
+              <div className="field">
+                <label>Order</label>
+                <select value={tierupOrder} onChange={(e) => setTierupOrder(e.target.value)}>
+                  <option value="asc">Ascending</option>
+                  <option value="desc">Descending</option>
+                </select>
+              </div>
+            </div>
+          </div>
+          <div className="results-actions">
+            <button type="button" className="ghost" onClick={() => toggleCollapsed("tierup")}>
+              {collapsed.tierup ? "Expand" : "Collapse"}
+            </button>
+          </div>
+        </div>
+        {!collapsed.tierup && (
+        <div className={statsCardsClass}>
+          {sortedTierupStats.map((row) => {
+            const games = Number(row.games_tierup || 0);
+            const wins = Number(row.wins_tierup || 0);
+            const draws = Number(row.draws_tierup || 0);
+            const losses = Math.max(0, games - wins - draws);
+            const rounds = Number(row.rounds_tierup || 0);
+            const roundWins = Number(row.round_wins_tierup || 0);
+            const roundDraws = Number(row.round_draws_tierup || 0);
+            const roundLosses = Math.max(0, rounds - roundWins - roundDraws);
+            return (
+              <div className="stats-card" key={`${row.pet_name}-${row._pack || "all"}`}>
+                <div className="stats-card-head">
+                  {petSprite(row.pet_name) ? (
+                    <img src={petSprite(row.pet_name)} alt="" />
+                  ) : null}
+                  <h4>{row.pet_name}</h4>
+                </div>
+                <div className="stats-card-meta">
+                  <span>Tier: {row._tier ?? "?"}</span>
+                  <span>Pack: {row._pack || "Unassigned"}</span>
+                </div>
+                <div className="stats-card-meta">Tierup Games: {games}</div>
+                <div className="stats-card-metrics">
+                  <div className="rate-win">Game Winrate: {formatPct(games ? wins / games : 0)}</div>
+                  <div className="rate-loss">Game Lossrate: {formatPct(games ? losses / games : 0)}</div>
+                  {draws > 0 && <div>Game Drawrate: {formatPct(games ? draws / games : 0)}</div>}
+                  <div>Tierup-Turn Battles: {rounds}</div>
+                  <div className="rate-win">Tierup-Turn Winrate: {formatPct(rounds ? roundWins / rounds : 0)}</div>
+                  <div className="rate-loss">Tierup-Turn Lossrate: {formatPct(rounds ? roundLosses / rounds : 0)}</div>
+                </div>
+              </div>
+            );
+          })}
+          {sortedTierupStats.length === 0 && !loading && (
+            <div className="stats-card empty">
+              {filters.scope === "battle" ? "Switch scope to Game to view tierup stats." : "No tierup pet stats yet."}
+            </div>
+          )}
+        </div>
         )}
       </section>
 
