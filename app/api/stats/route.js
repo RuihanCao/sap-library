@@ -805,13 +805,23 @@ export async function GET(req) {
       group by p.replay_id, p.side, p.pet_name
     ),
     tierup_events as (
-      select fa.replay_id, fa.side, fa.pet_name, fa.first_turn
+      select fa.replay_id, fa.side, fa.pet_name, fa.first_turn, pt.tier
       from pet_first_appear fa
       join pet_tiers pt on pt.pet_name = fa.pet_name
       join base b on b.id = fa.replay_id
       where fa.first_turn < (2 * pt.tier - 1)
         and ((fa.side = 'player' and b.include_player_side)
           or (fa.side = 'opponent' and b.include_opponent_side))
+    ),
+    tierup_turn_events as (
+      -- every battle where the tiered-up pet is still on the board AND still
+      -- ahead of its tier (turn before its normal unlock at 2*tier-1). This is
+      -- 1-2 battles depending on which turn it was acquired.
+      select distinct te.pet_name, te.replay_id, te.side, t.turn_number, t.outcome
+      from tierup_events te
+      join pets p on p.replay_id = te.replay_id and p.side = te.side and p.pet_name = te.pet_name
+      join turns t on t.replay_id = te.replay_id and t.turn_number = p.turn_number
+      where p.turn_number < (2 * te.tier - 1)
     ),
     tierup_game_agg as (
       select
@@ -829,17 +839,16 @@ export async function GET(req) {
     ),
     tierup_turn_agg as (
       select
-        te.pet_name,
+        tte.pet_name,
         count(*)::int as rounds_tierup,
         sum(case
-          when te.side = 'player' and t.outcome = 1 then 1
-          when te.side = 'opponent' and t.outcome = 2 then 1
+          when tte.side = 'player' and tte.outcome = 1 then 1
+          when tte.side = 'opponent' and tte.outcome = 2 then 1
           else 0
         end)::int as round_wins_tierup,
-        sum((t.outcome = 3)::int)::int as round_draws_tierup
-      from tierup_events te
-      join turns t on t.replay_id = te.replay_id and t.turn_number = te.first_turn
-      group by te.pet_name
+        sum((tte.outcome = 3)::int)::int as round_draws_tierup
+      from tierup_turn_events tte
+      group by tte.pet_name
     ),
     tierup_stats_agg as (
       select

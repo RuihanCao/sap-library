@@ -1604,6 +1604,7 @@ export default function StatsPage() {
           <h2>Tierup Pets</h2>
           <p className="section-hint">
             Winrate when a pet is acquired ahead of its tier (first seen before turn 2·tier−1, i.e. via a level-up choice).
+            Ahead-of-tier battles cover every turn the pet is still early (1–2 turns, depending on when it was grabbed).
             {filters.scope === "battle" ? " Switch scope to Game to view." : ""}
           </p>
           <div className="sort-menu" onClick={(e) => e.stopPropagation()}>
@@ -1613,7 +1614,7 @@ export default function StatsPage() {
                 <select value={tierupSort} onChange={(e) => setTierupSort(e.target.value)}>
                   <option value="games">Tierup Games</option>
                   <option value="gameWinrate">Game Winrate</option>
-                  <option value="turnWinrate">Tierup-Turn Winrate</option>
+                  <option value="turnWinrate">Ahead-of-Tier Winrate</option>
                   <option value="tier">Tier</option>
                   <option value="name">Name</option>
                 </select>
@@ -1661,9 +1662,9 @@ export default function StatsPage() {
                   <div className="rate-win">Game Winrate: {formatPct(games ? wins / games : 0)}</div>
                   <div className="rate-loss">Game Lossrate: {formatPct(games ? losses / games : 0)}</div>
                   {draws > 0 && <div>Game Drawrate: {formatPct(games ? draws / games : 0)}</div>}
-                  <div>Tierup-Turn Battles: {rounds}</div>
-                  <div className="rate-win">Tierup-Turn Winrate: {formatPct(rounds ? roundWins / rounds : 0)}</div>
-                  <div className="rate-loss">Tierup-Turn Lossrate: {formatPct(rounds ? roundLosses / rounds : 0)}</div>
+                  <div>Ahead-of-Tier Battles: {rounds}</div>
+                  <div className="rate-win">Ahead-of-Tier Winrate: {formatPct(rounds ? roundWins / rounds : 0)}</div>
+                  <div className="rate-loss">Ahead-of-Tier Lossrate: {formatPct(rounds ? roundLosses / rounds : 0)}</div>
                 </div>
               </div>
             );
