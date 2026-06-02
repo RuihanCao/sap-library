@@ -1567,6 +1567,32 @@ export default function StatsPage() {
                       <div className="rate-loss">Lossrate: {formatPct(gamesWith ? lossesWith / gamesWith : 0)}</div>
                       <div>Drawrate: {formatPct(gamesWith ? drawsWith / gamesWith : 0)}</div>
                     </div>
+                    {(() => {
+                      const aheadGames = Number(row.ahead_games || 0);
+                      const aheadWins = Number(row.ahead_wins || 0);
+                      const onGames = Number(row.on_games || 0);
+                      const onWins = Number(row.on_wins || 0);
+                      const behindGames = Number(row.behind_games || 0);
+                      const behindWins = Number(row.behind_wins || 0);
+                      if (!aheadGames && !onGames && !behindGames) return null;
+                      return (
+                        <div className="stats-card-metrics curve-breakdown">
+                          <div className="curve-label">By curve (battle winrate)</div>
+                          <div className="rate-win">
+                            Ahead: {aheadGames ? formatPct(aheadWins / aheadGames) : "—"}
+                            <span className="curve-count"> ({aheadGames})</span>
+                          </div>
+                          <div>
+                            On: {onGames ? formatPct(onWins / onGames) : "—"}
+                            <span className="curve-count"> ({onGames})</span>
+                          </div>
+                          <div className="rate-loss">
+                            Behind: {behindGames ? formatPct(behindWins / behindGames) : "—"}
+                            <span className="curve-count"> ({behindGames})</span>
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </>
                 ) : (
                   <>

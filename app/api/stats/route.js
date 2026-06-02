@@ -900,6 +900,10 @@ export async function GET(req) {
       from replays r
       where ${clauses.join(" and ")}
     ),
+    pet_tiers as (
+      select pet_name, tier
+      from unnest($TIER_NAMES::text[], $TIER_VALUES::int[]) as t(pet_name, tier)
+    ),
     turns_base as (
       select
         t.id as turn_id,
@@ -1000,13 +1004,22 @@ export async function GET(req) {
         tb.turn_id,
         p.pet_name,
         tb.outcome,
-        p.side
+        p.side,
+        -- curve position: pet's tier vs the tier normally available this turn
+        -- (least(6, floor((turn+1)/2))). ahead = tiered up, behind = stale.
+        case
+          when pt.tier is null then null
+          when pt.tier > least(6, (tb.turn_number + 1) / 2) then 'ahead'
+          when pt.tier = least(6, (tb.turn_number + 1) / 2) then 'on'
+          else 'behind'
+        end as curve
       from turns_base tb
       join pets p on p.replay_id = tb.replay_id and p.turn_number = tb.turn_number
       join base b on b.id = tb.replay_id
+      left join pet_tiers pt on pt.pet_name = p.pet_name
       where p.pet_name is not null ${petClause} ${petLevelClause}
       and ((p.side = 'player' and b.include_player_side) or (p.side = 'opponent' and b.include_opponent_side))
-      group by tb.turn_id, p.pet_name, tb.outcome, p.side
+      group by tb.turn_id, p.pet_name, tb.outcome, p.side, curve
     ),
     perk_rounds as (
       select
@@ -1152,7 +1165,16 @@ export async function GET(req) {
             when pr.side = 'opponent' and pr.outcome = 2 then 1
             else 0
           end)::int as wins_with,
-          sum(case when pr.outcome = 3 then 1 else 0 end)::int as draws_with
+          sum(case when pr.outcome = 3 then 1 else 0 end)::int as draws_with,
+          sum((pr.curve = 'ahead')::int)::int as ahead_games,
+          sum(case when pr.curve = 'ahead' and ((pr.side = 'player' and pr.outcome = 1) or (pr.side = 'opponent' and pr.outcome = 2)) then 1 else 0 end)::int as ahead_wins,
+          sum(case when pr.curve = 'ahead' and pr.outcome = 3 then 1 else 0 end)::int as ahead_draws,
+          sum((pr.curve = 'on')::int)::int as on_games,
+          sum(case when pr.curve = 'on' and ((pr.side = 'player' and pr.outcome = 1) or (pr.side = 'opponent' and pr.outcome = 2)) then 1 else 0 end)::int as on_wins,
+          sum(case when pr.curve = 'on' and pr.outcome = 3 then 1 else 0 end)::int as on_draws,
+          sum((pr.curve = 'behind')::int)::int as behind_games,
+          sum(case when pr.curve = 'behind' and ((pr.side = 'player' and pr.outcome = 1) or (pr.side = 'opponent' and pr.outcome = 2)) then 1 else 0 end)::int as behind_wins,
+          sum(case when pr.curve = 'behind' and pr.outcome = 3 then 1 else 0 end)::int as behind_draws
         from pet_rounds pr
         group by pr.pet_name
         order by count(*) desc, pr.pet_name asc

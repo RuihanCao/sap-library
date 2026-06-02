@@ -1792,6 +1792,24 @@ button:hover:not(:disabled) {
   font-size: 13px;
 }
 
+.stats-card-metrics.curve-breakdown {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--edge);
+}
+
+.curve-breakdown .curve-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.6;
+}
+
+.curve-breakdown .curve-count {
+  opacity: 0.55;
+  font-size: 12px;
+}
+
 .stats-card-actions {
   margin-top: 2px;
   display: flex;
