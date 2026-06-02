@@ -270,6 +270,8 @@ export default function StatsPage() {
   });
   const [expandedMatchupRows, setExpandedMatchupRows] = useState({});
   const [matchupPerspectiveRows, setMatchupPerspectiveRows] = useState({});
+  // Per-pet per-turn drill-down: pet_name -> { open, loading, turns, error }
+  const [petTurns, setPetTurns] = useState({});
   const [shareStatus, setShareStatus] = useState("");
   const [visibleRows, setVisibleRows] = useState({
     pack: STATS_INITIAL_BATCH,
@@ -387,6 +389,40 @@ export default function StatsPage() {
     return params;
   }
 
+  function togglePetTurns(petName) {
+    const current = petTurns[petName];
+    if (current?.open) {
+      setPetTurns((prev) => ({ ...prev, [petName]: { ...prev[petName], open: false } }));
+      return;
+    }
+    setPetTurns((prev) => ({
+      ...prev,
+      [petName]: { ...(prev[petName] || {}), open: true, loading: !current?.turns }
+    }));
+    if (current?.turns) return; // already loaded for the current filters
+
+    const params = buildStatsParams(filters, undefined, {
+      includePet: false,
+      includePerk: false,
+      includeToy: false
+    });
+    params.set("petName", petName);
+    fetch(`/api/stats/pet-turns?${params.toString()}`)
+      .then((res) => (res.ok ? res.json() : { turns: [] }))
+      .then((data) =>
+        setPetTurns((prev) => ({
+          ...prev,
+          [petName]: { ...(prev[petName] || {}), open: true, loading: false, turns: data.turns || [] }
+        }))
+      )
+      .catch(() =>
+        setPetTurns((prev) => ({
+          ...prev,
+          [petName]: { ...(prev[petName] || {}), open: true, loading: false, turns: [], error: true }
+        }))
+      );
+  }
+
   function syncStatsUrl(nextFilters = filters, uiState) {
     const params = buildStatsParams(nextFilters, uiState, { includePet: true });
     const nextUrl = params.toString() ? `?${params.toString()}` : window.location.pathname;
@@ -437,6 +473,7 @@ export default function StatsPage() {
       });
       setExpandedMatchupRows({});
       setMatchupPerspectiveRows({});
+      setPetTurns({});
 
       if (!options.skipUrlSync) {
         const urlParams = buildStatsParams(nextFilters, options.uiState, { includePet: true });
@@ -1626,6 +1663,58 @@ export default function StatsPage() {
                     </div>
                   </>
                 )}
+                {(() => {
+                  const detail = petTurns[row.pet_name];
+                  const turns = detail?.turns || [];
+                  return (
+                    <div className="pet-turns">
+                      <button
+                        type="button"
+                        className="pet-turns-toggle"
+                        aria-expanded={detail?.open ? "true" : "false"}
+                        onClick={() => togglePetTurns(row.pet_name)}
+                      >
+                        <span className="pet-turns-caret">{detail?.open ? "▾" : "▸"}</span>
+                        Per-turn winrate
+                      </button>
+                      {detail?.open && (
+                        <div className="pet-turns-body">
+                          {detail.loading && <div className="muted">Loading…</div>}
+                          {!detail.loading && turns.length === 0 && (
+                            <div className="muted">No turn data for these filters.</div>
+                          )}
+                          {!detail.loading && turns.length > 0 && (
+                            <table className="pet-turns-table">
+                              <thead>
+                                <tr>
+                                  <th>Turn</th>
+                                  <th>Rounds</th>
+                                  <th>Win</th>
+                                  <th>Loss</th>
+                                  <th>Draw</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {turns.map((t) => {
+                                  const r = Number(t.rounds || 0);
+                                  return (
+                                    <tr key={t.turn_number}>
+                                      <td>{t.turn_number}</td>
+                                      <td>{r}</td>
+                                      <td className="rate-win">{r ? formatPct(Number(t.wins || 0) / r) : "—"}</td>
+                                      <td className="rate-loss">{r ? formatPct(Number(t.losses || 0) / r) : "—"}</td>
+                                      <td>{r ? formatPct(Number(t.draws || 0) / r) : "—"}</td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             );
           })}
