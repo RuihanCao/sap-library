@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { LocalProfileMarker } from "@/app/components/local-profile-marker";
 import { PackInlineName, PackMatchupInline } from "@/app/components/pack-inline";
-import { fetchClientMeta } from "@/lib/clientMeta";
+import { fetchClientMetaOptions, fetchClientMetaVersions } from "@/lib/clientMeta";
 import { LOCAL_PROFILE_EVENT, readLocalProfile } from "@/lib/localProfile";
 import { hasSummitTag } from "@/lib/replayTags";
 import { BUILD_BACKGROUNDS, pickTheme } from "@/lib/themes";
@@ -234,7 +234,16 @@ export default function Page() {
   }, []);
 
   useEffect(() => {
-    fetchClientMeta().then(setMeta);
+    let alive = true;
+    fetchClientMetaOptions().then((opts) => {
+      if (alive) setMeta((m) => ({ ...m, ...opts }));
+    });
+    fetchClientMetaVersions().then((v) => {
+      if (alive) setMeta((m) => ({ ...m, ...v }));
+    });
+    return () => {
+      alive = false;
+    };
   }, []);
 
   useEffect(() => {

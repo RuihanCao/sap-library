@@ -1,16 +1,13 @@
 import { NextResponse } from "next/server";
 import { pool } from "@/lib/db";
 import { getAvailableVersions, getCurrentVersion } from "@/lib/versionFilter";
-const { buildMetaOptions } = require("@/lib/metaOptions");
 
 export const runtime = "nodejs";
 
-// Combined meta payload, kept for backwards compatibility. The client now
-// prefers the split /api/meta/options + /api/meta/versions endpoints so filter
-// dropdowns can render before the DB-backed version data arrives.
+// Dynamic, DB-backed slice of meta: the version list + current version. Kept
+// separate from the static filter options so the heavy option lists are never
+// blocked behind a database round-trip.
 export async function GET() {
-  const options = buildMetaOptions();
-
   let versions = [];
   let currentVersion = null;
   try {
@@ -24,10 +21,10 @@ export async function GET() {
   }
 
   return NextResponse.json(
-    { ...options, versions, currentVersion },
+    { versions, currentVersion },
     {
       headers: {
-        "Cache-Control": "public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800"
+        "Cache-Control": "public, max-age=300, s-maxage=600, stale-while-revalidate=86400"
       }
     }
   );

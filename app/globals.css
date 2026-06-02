@@ -1786,6 +1786,41 @@ button:hover:not(:disabled) {
   opacity: 0.7;
 }
 
+.loading-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  z-index: 1000;
+  background: rgba(120, 130, 160, 0.18);
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.loading-bar-fill {
+  height: 100%;
+  width: 40%;
+  border-radius: 0 3px 3px 0;
+  background: linear-gradient(90deg, var(--accent, #5b8cff), #8f7bff);
+  animation: loading-bar-sweep 1.1s ease-in-out infinite;
+  will-change: transform;
+}
+
+.loading-bar-fill.done {
+  width: 100%;
+  animation: none;
+  transform: none;
+  transition: opacity 0.35s ease;
+  opacity: 0;
+}
+
+@keyframes loading-bar-sweep {
+  0% { transform: translateX(-100%); }
+  50% { transform: translateX(120%); }
+  100% { transform: translateX(260%); }
+}
+
 .stats-card-metrics {
   display: grid;
   gap: 6px;

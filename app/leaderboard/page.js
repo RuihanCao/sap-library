@@ -6,7 +6,8 @@ import { PackInlineName, PackMatchupInline } from "@/app/components/pack-inline"
 import { SemanticLabel } from "@/app/components/semantic-label";
 import { LocalProfileMarker } from "@/app/components/local-profile-marker";
 import { getPackSprite } from "@/lib/packSprites";
-import { fetchClientMeta } from "@/lib/clientMeta";
+import { fetchClientMetaOptions, fetchClientMetaVersions } from "@/lib/clientMeta";
+import { LoadingBar } from "@/app/components/loading-bar";
 import { BUILD_BACKGROUNDS, pickTheme } from "@/lib/themes";
 
 const EXCLUDED_PACKS = ["Custom", "Weekly"];
@@ -199,7 +200,16 @@ export default function LeaderboardPage() {
   }, []);
 
   useEffect(() => {
-    fetchClientMeta().then(setMeta);
+    let alive = true;
+    fetchClientMetaOptions().then((opts) => {
+      if (alive) setMeta((m) => ({ ...m, ...opts }));
+    });
+    fetchClientMetaVersions().then((v) => {
+      if (alive) setMeta((m) => ({ ...m, ...v }));
+    });
+    return () => {
+      alive = false;
+    };
   }, []);
 
   function buildListParams(nextFilters = filters, nextPage = page, nextPlayerId = selectedPlayerId) {
@@ -443,6 +453,7 @@ export default function LeaderboardPage() {
 
   return (
     <main>
+      <LoadingBar active={loading} />
       <section className="hero">
         <div className="hero-copy">
           <h1>Sap Library</h1>

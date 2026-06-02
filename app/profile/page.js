@@ -5,7 +5,8 @@ import Link from "next/link";
 import { PackInlineName, PackMatchupInline } from "@/app/components/pack-inline";
 import { SemanticLabel } from "@/app/components/semantic-label";
 import { LocalProfileMarker } from "@/app/components/local-profile-marker";
-import { fetchClientMeta } from "@/lib/clientMeta";
+import { fetchClientMetaOptions, fetchClientMetaVersions } from "@/lib/clientMeta";
+import { LoadingBar } from "@/app/components/loading-bar";
 import { clearLocalProfile, readLocalProfile, writeLocalProfile } from "@/lib/localProfile";
 import { hasSummitTag } from "@/lib/replayTags";
 import { BUILD_BACKGROUNDS, pickTheme } from "@/lib/themes";
@@ -258,7 +259,16 @@ export default function ProfilePage() {
   }, []);
 
   useEffect(() => {
-    fetchClientMeta().then(setMeta);
+    let alive = true;
+    fetchClientMetaOptions().then((opts) => {
+      if (alive) setMeta((m) => ({ ...m, ...opts }));
+    });
+    fetchClientMetaVersions().then((v) => {
+      if (alive) setMeta((m) => ({ ...m, ...v }));
+    });
+    return () => {
+      alive = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -974,6 +984,7 @@ export default function ProfilePage() {
 
   return (
     <main>
+      <LoadingBar active={loading} />
       <section className="hero">
         <div className="hero-copy">
           <h1>Player Profile</h1>

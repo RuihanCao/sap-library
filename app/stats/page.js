@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { getPackSprite } from "@/lib/packSprites";
-import { fetchClientMeta } from "@/lib/clientMeta";
+import { fetchClientMetaOptions, fetchClientMetaVersions } from "@/lib/clientMeta";
+import { LoadingBar } from "@/app/components/loading-bar";
 import { SemanticLabel } from "@/app/components/semantic-label";
 import { PackMatchupInline } from "@/app/components/pack-inline";
 import { LocalProfileMarker } from "@/app/components/local-profile-marker";
@@ -244,6 +245,7 @@ export default function StatsPage() {
     tierupPetStats: []
   });
   const [loading, setLoading] = useState(false);
+  const [optionsLoading, setOptionsLoading] = useState(true);
   const [tierupSort, setTierupSort] = useState("games");
   const [tierupOrder, setTierupOrder] = useState("desc");
   const [petSort, setPetSort] = useState(defaultSortForScope(DEFAULT_STATS_FILTERS.scope));
@@ -297,7 +299,22 @@ export default function StatsPage() {
   }, []);
 
   useEffect(() => {
-    fetchClientMeta().then(setMeta);
+    let alive = true;
+    // Load the static filter options first so the dropdowns populate fast,
+    // then fill in the DB-backed version list when it arrives.
+    fetchClientMetaOptions()
+      .then((opts) => {
+        if (alive) setMeta((m) => ({ ...m, ...opts }));
+      })
+      .finally(() => {
+        if (alive) setOptionsLoading(false);
+      });
+    fetchClientMetaVersions().then((v) => {
+      if (alive) setMeta((m) => ({ ...m, ...v }));
+    });
+    return () => {
+      alive = false;
+    };
   }, []);
 
   const packOptions = useMemo(() => meta.packs.filter((pack) => !EXCLUDED_PACKS.includes(pack.name)), [meta.packs]);
@@ -937,6 +954,7 @@ export default function StatsPage() {
 
   return (
     <main onClick={() => setSortMenuOpen({ pet: false, perk: false, toy: false })}>
+      <LoadingBar active={loading || optionsLoading} />
       <header className="hero">
         <div className="hero-copy">
           <h1>Stats Lab</h1>
