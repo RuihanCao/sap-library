@@ -270,8 +270,10 @@ export default function StatsPage() {
   });
   const [expandedMatchupRows, setExpandedMatchupRows] = useState({});
   const [matchupPerspectiveRows, setMatchupPerspectiveRows] = useState({});
-  // Per-pet per-turn drill-down: pet_name -> { open, loading, turns, error }
+  // Per-pet per-turn drill-down cache: pet_name -> { loading, turns, error }
   const [petTurns, setPetTurns] = useState({});
+  // Which pet's per-turn breakdown is shown in the modal (null = closed).
+  const [petTurnsModal, setPetTurnsModal] = useState(null);
   const [shareStatus, setShareStatus] = useState("");
   const [visibleRows, setVisibleRows] = useState({
     pack: STATS_INITIAL_BATCH,
@@ -318,6 +320,15 @@ export default function StatsPage() {
       alive = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!petTurnsModal) return;
+    const onKey = (e) => {
+      if (e.key === "Escape") setPetTurnsModal(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [petTurnsModal]);
 
   const packOptions = useMemo(() => meta.packs.filter((pack) => !EXCLUDED_PACKS.includes(pack.name)), [meta.packs]);
   const petOptions = useMemo(() => meta.pets, [meta.pets]);
@@ -389,17 +400,15 @@ export default function StatsPage() {
     return params;
   }
 
-  function togglePetTurns(petName) {
+  function openPetTurns(petName) {
+    setPetTurnsModal(petName);
     const current = petTurns[petName];
-    if (current?.open) {
-      setPetTurns((prev) => ({ ...prev, [petName]: { ...prev[petName], open: false } }));
-      return;
-    }
+    if (current?.turns) return; // already loaded for the current filters
+
     setPetTurns((prev) => ({
       ...prev,
-      [petName]: { ...(prev[petName] || {}), open: true, loading: !current?.turns }
+      [petName]: { ...(prev[petName] || {}), loading: true }
     }));
-    if (current?.turns) return; // already loaded for the current filters
 
     const params = buildStatsParams(filters, undefined, {
       includePet: false,
@@ -412,15 +421,19 @@ export default function StatsPage() {
       .then((data) =>
         setPetTurns((prev) => ({
           ...prev,
-          [petName]: { ...(prev[petName] || {}), open: true, loading: false, turns: data.turns || [] }
+          [petName]: { ...(prev[petName] || {}), loading: false, turns: data.turns || [] }
         }))
       )
       .catch(() =>
         setPetTurns((prev) => ({
           ...prev,
-          [petName]: { ...(prev[petName] || {}), open: true, loading: false, turns: [], error: true }
+          [petName]: { ...(prev[petName] || {}), loading: false, turns: [], error: true }
         }))
       );
+  }
+
+  function closePetTurns() {
+    setPetTurnsModal(null);
   }
 
   function syncStatsUrl(nextFilters = filters, uiState) {
@@ -474,6 +487,7 @@ export default function StatsPage() {
       setExpandedMatchupRows({});
       setMatchupPerspectiveRows({});
       setPetTurns({});
+      setPetTurnsModal(null);
 
       if (!options.skipUrlSync) {
         const urlParams = buildStatsParams(nextFilters, options.uiState, { includePet: true });
@@ -1663,58 +1677,15 @@ export default function StatsPage() {
                     </div>
                   </>
                 )}
-                {(() => {
-                  const detail = petTurns[row.pet_name];
-                  const turns = detail?.turns || [];
-                  return (
-                    <div className="pet-turns">
-                      <button
-                        type="button"
-                        className="pet-turns-toggle"
-                        aria-expanded={detail?.open ? "true" : "false"}
-                        onClick={() => togglePetTurns(row.pet_name)}
-                      >
-                        <span className="pet-turns-caret">{detail?.open ? "▾" : "▸"}</span>
-                        Per-turn winrate
-                      </button>
-                      {detail?.open && (
-                        <div className="pet-turns-body">
-                          {detail.loading && <div className="muted">Loading…</div>}
-                          {!detail.loading && turns.length === 0 && (
-                            <div className="muted">No turn data for these filters.</div>
-                          )}
-                          {!detail.loading && turns.length > 0 && (
-                            <table className="pet-turns-table">
-                              <thead>
-                                <tr>
-                                  <th>Turn</th>
-                                  <th>Rounds</th>
-                                  <th>Win</th>
-                                  <th>Loss</th>
-                                  <th>Draw</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {turns.map((t) => {
-                                  const r = Number(t.rounds || 0);
-                                  return (
-                                    <tr key={t.turn_number}>
-                                      <td>{t.turn_number}</td>
-                                      <td>{r}</td>
-                                      <td className="rate-win">{r ? formatPct(Number(t.wins || 0) / r) : "—"}</td>
-                                      <td className="rate-loss">{r ? formatPct(Number(t.losses || 0) / r) : "—"}</td>
-                                      <td>{r ? formatPct(Number(t.draws || 0) / r) : "—"}</td>
-                                    </tr>
-                                  );
-                                })}
-                              </tbody>
-                            </table>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })()}
+                <div className="pet-turns">
+                  <button
+                    type="button"
+                    className="pet-turns-toggle"
+                    onClick={() => openPetTurns(row.pet_name)}
+                  >
+                    Per-turn winrate ›
+                  </button>
+                </div>
               </div>
             );
           })}
@@ -2231,6 +2202,59 @@ export default function StatsPage() {
         </>
         )}
       </section>
+
+      {petTurnsModal && (() => {
+        const detail = petTurns[petTurnsModal] || {};
+        const turns = detail.turns || [];
+        return (
+          <div className="modal-backdrop" onClick={closePetTurns}>
+            <div className="modal pet-turns-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-head">
+                <h3 className="pet-turns-modal-title">
+                  {petSprite(petTurnsModal) ? (
+                    <img src={petSprite(petTurnsModal)} alt="" />
+                  ) : null}
+                  <span>{petTurnsModal} · per-turn winrate</span>
+                </h3>
+                <div className="modal-head-actions">
+                  <button className="ghost" type="button" onClick={closePetTurns}>Close</button>
+                </div>
+              </div>
+              {detail.loading && <div className="muted">Loading…</div>}
+              {!detail.loading && turns.length === 0 && (
+                <div className="muted">No turn data for these filters.</div>
+              )}
+              {!detail.loading && turns.length > 0 && (
+                <table className="pet-turns-table">
+                  <thead>
+                    <tr>
+                      <th>Turn</th>
+                      <th>Rounds</th>
+                      <th>Win</th>
+                      <th>Loss</th>
+                      <th>Draw</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {turns.map((t) => {
+                      const r = Number(t.rounds || 0);
+                      return (
+                        <tr key={t.turn_number}>
+                          <td>{t.turn_number}</td>
+                          <td>{r}</td>
+                          <td className="rate-win">{r ? formatPct(Number(t.wins || 0) / r) : "—"}</td>
+                          <td className="rate-loss">{r ? formatPct(Number(t.losses || 0) / r) : "—"}</td>
+                          <td>{r ? formatPct(Number(t.draws || 0) / r) : "—"}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        );
+      })()}
     </main>
   );
 }
