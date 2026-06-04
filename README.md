@@ -14,6 +14,13 @@ npm install
 DATABASE_URL=postgresql://user:pass@host:port/db
 SAP_EMAIL=your_sap_email
 SAP_PASSWORD=your_sap_password
+
+# Optional version controls
+SAP_API_VERSION=47
+# Optional pin for the site's "current" filter. If omitted, the site uses the highest version in your DB.
+SAP_CURRENT_VERSION=47
+SAP_API_VERSION_PROBE_AHEAD=2
+SAP_API_VERSION_PROBE_BEHIND=8
 ```
 
 3) Create tables:
@@ -56,6 +63,10 @@ Open `http://localhost:3000`.
 
 - `canvas` may require build tools on Windows.
 - The app logs into Teamwood to fetch a bearer token automatically using `SAP_EMAIL` and `SAP_PASSWORD`.
+- Teamwood login will try the configured API version first, then probe nearby versions if the game has moved ahead.
+- Replay fetch reuses that current auth token and probes nearby playback versions when Teamwood reports a playback/version mismatch.
+- `SAP_CURRENT_VERSION` lets you pin what the site treats as the default "current" replay version filter. If omitted, the site uses the highest ingested replay version automatically.
+- Very old replay versions can still become unavailable if Teamwood retires those playback endpoints entirely.
 - To backfill version 45 rank + IDs after upgrading schema:
 ```powershell
 npm run backfill:ranks-v45

@@ -6,101 +6,9 @@ import { PackInlineName, PackMatchupInline } from "@/app/components/pack-inline"
 import { SemanticLabel } from "@/app/components/semantic-label";
 import { LocalProfileMarker } from "@/app/components/local-profile-marker";
 import { getPackSprite } from "@/lib/packSprites";
-import { fetchClientMeta } from "@/lib/clientMeta";
-
-const BUILD_BACKGROUNDS = [
-  "AboveCloudsBuild.png",
-  "ArcticBuild.png",
-  "AutumnForestBuild.png",
-  "BeachBuild.png",
-  "BridgeBuild.png",
-  "CastleWallBuild.png",
-  "CaveBuild.png",
-  "ChildRoomBuild.png",
-  "ChristmasCabinBuild.png",
-  "ColosseumBuild.png",
-  "CornFieldBuild.png",
-  "CyberSpaceBuild.png",
-  "DesertBuild.png",
-  "DungeonBuild.png",
-  "FarmBuild.png",
-  "FieldBuild.png",
-  "FoodLandBuild.png",
-  "FrontYardBuild.png",
-  "HalloweenStreetBuild.png",
-  "InsideSecretBaseBuild.png",
-  "JungleBuild.png",
-  "LavaCaveBuild.png",
-  "LavaMountainBuild.png",
-  "LunarTempleBuild.png",
-  "MoneyBinBuild.png",
-  "MoonBuild.png",
-  "PagodaBuild.png",
-  "PlaygroundBuild.png",
-  "SavannaBuild.png",
-  "ScaryForestBuild.png",
-  "SchoolHallwayBuild.png",
-  "SewerBuild.png",
-  "SnackBinBuild.png",
-  "SnowBuild.png",
-  "SpaceStationBuild.png",
-  "UnderwaterBuild.png",
-  "UrbanCityBuild.png",
-  "WildWestTownBuild.png",
-  "WinterPineForestBuild.png",
-  "WizardSchoolBuild.png"
-];
-
-const THEMES = {
-  cool: {
-    bg: "#f3f6fb",
-    "bg-2": "#e3ebf6",
-    panel: "#f6f9ff",
-    "panel-2": "#dbe8f7",
-    surface: "#f9fbff",
-    ink: "#0f1a2a",
-    muted: "#4a5b76",
-    edge: "#c7d6ea",
-    accent: "#3aa7c9",
-    "accent-2": "#6ac2f0",
-    "accent-3": "#9ad7ff",
-    glow: "rgba(74, 175, 230, 0.22)",
-    "overlay-1": "rgba(9, 17, 34, 0.62)",
-    "overlay-2": "rgba(9, 17, 34, 0.2)"
-  },
-  warm: {
-    bg: "#fff0e3",
-    "bg-2": "#ffd8c4",
-    panel: "#fff3e9",
-    "panel-2": "#ffcaa8",
-    surface: "#fff7f0",
-    ink: "#2a1408",
-    muted: "#7a4b2f",
-    edge: "#f2b68a",
-    accent: "#ff8a3d",
-    "accent-2": "#ffb062",
-    "accent-3": "#ffd09a",
-    glow: "rgba(255, 146, 84, 0.22)",
-    "overlay-1": "rgba(40, 18, 8, 0.58)",
-    "overlay-2": "rgba(40, 18, 8, 0.22)"
-  },
-  forest: {
-    bg: "#eff6ee",
-    "bg-2": "#d7ead4",
-    panel: "#f3faf2",
-    "panel-2": "#cfe8c9",
-    surface: "#f7fbf6",
-    ink: "#122414",
-    muted: "#4c6a52",
-    edge: "#bcd8bf",
-    accent: "#3b9d64",
-    "accent-2": "#6bc489",
-    "accent-3": "#9fe2b6",
-    glow: "rgba(59, 157, 100, 0.22)",
-    "overlay-1": "rgba(9, 20, 12, 0.6)",
-    "overlay-2": "rgba(9, 20, 12, 0.2)"
-  }
-};
+import { fetchClientMetaOptions, fetchClientMetaVersions } from "@/lib/clientMeta";
+import { LoadingBar } from "@/app/components/loading-bar";
+import { BUILD_BACKGROUNDS, pickTheme } from "@/lib/themes";
 
 const EXCLUDED_PACKS = ["Custom", "Weekly"];
 const DEFAULT_MIN_MATCH_THRESHOLD = 10;
@@ -136,16 +44,6 @@ const DEFAULT_FILTER_SECTION_VISIBILITY = {
   items: false
 };
 
-function pickTheme(name) {
-  const lower = name.toLowerCase();
-  if (lower.includes("arctic") || lower.includes("snow") || lower.includes("winter") || lower.includes("moon")) {
-    return THEMES.cool;
-  }
-  if (lower.includes("desert") || lower.includes("savanna") || lower.includes("lava") || lower.includes("beach")) {
-    return THEMES.warm;
-  }
-  return THEMES.forest;
-}
 
 function parseCsvList(value) {
   if (!value) return [];
@@ -302,7 +200,16 @@ export default function LeaderboardPage() {
   }, []);
 
   useEffect(() => {
-    fetchClientMeta().then(setMeta);
+    let alive = true;
+    fetchClientMetaOptions().then((opts) => {
+      if (alive) setMeta((m) => ({ ...m, ...opts }));
+    });
+    fetchClientMetaVersions().then((v) => {
+      if (alive) setMeta((m) => ({ ...m, ...v }));
+    });
+    return () => {
+      alive = false;
+    };
   }, []);
 
   function buildListParams(nextFilters = filters, nextPage = page, nextPlayerId = selectedPlayerId) {
@@ -546,6 +453,7 @@ export default function LeaderboardPage() {
 
   return (
     <main>
+      <LoadingBar active={loading} />
       <section className="hero">
         <div className="hero-copy">
           <h1>Sap Library</h1>

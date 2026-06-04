@@ -2,11 +2,38 @@ import { NextResponse } from "next/server";
 import { pool } from "@/lib/db";
 import { ensureHiddenPlayersTable, hiddenReplayClause } from "@/lib/hiddenPlayers";
 import { resolveVersionFilter } from "@/lib/versionFilter";
+const { PETS } = require("@/lib/data");
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const EXCLUDED_PACKS = ["Custom", "Weekly"];
+
+// Map each rollable shop pet name to its tier (1-6). A tier-T pet normally
+// unlocks on turn (2T-1), so a pet first seen on a board before that turn was
+// acquired early via a level-up "tierup" choice. Names that map to more than
+// one tier across packs (Goat/Lion/Snake) are dropped to avoid misclassifying.
+const { TIER_NAMES, TIER_VALUES } = (() => {
+  const tierByName = new Map();
+  const ambiguous = new Set();
+  for (const id in PETS) {
+    const pet = PETS[id];
+    const name = pet?.Name;
+    const tier = Number(pet?.Tier);
+    if (!name || pet?.Rollable !== true) continue;
+    if (!Number.isFinite(tier) || tier < 1 || tier > 6) continue;
+    if (tierByName.has(name) && tierByName.get(name) !== tier) {
+      ambiguous.add(name);
+      continue;
+    }
+    tierByName.set(name, tier);
+  }
+  for (const name of ambiguous) tierByName.delete(name);
+  return {
+    TIER_NAMES: [...tierByName.keys()],
+    TIER_VALUES: [...tierByName.values()]
+  };
+})();
 const STATS_CACHE_TTL_MS = 30_000;
 const STATS_CACHE_MAX_KEYS = 200;
 const globalForStatsCache = globalThis;
@@ -765,6 +792,75 @@ export async function GET(req) {
         coalesce(te.draws_end, 0)::int as draws_end
       from toy_any_agg ta
       full outer join toy_end_agg te on te.toy_name = ta.toy_name
+    ),
+    pet_tiers as (
+      select pet_name, tier
+      from unnest($TIER_NAMES::text[], $TIER_VALUES::int[]) as t(pet_name, tier)
+    ),
+    pet_first_appear as (
+      select p.replay_id, p.side, p.pet_name, min(p.turn_number) as first_turn
+      from base b
+      join pets p on p.replay_id = b.id
+      where p.pet_name is not null
+      group by p.replay_id, p.side, p.pet_name
+    ),
+    tierup_events as (
+      select fa.replay_id, fa.side, fa.pet_name, fa.first_turn, pt.tier
+      from pet_first_appear fa
+      join pet_tiers pt on pt.pet_name = fa.pet_name
+      join base b on b.id = fa.replay_id
+      where fa.first_turn < (2 * pt.tier - 1)
+        and ((fa.side = 'player' and b.include_player_side)
+          or (fa.side = 'opponent' and b.include_opponent_side))
+    ),
+    tierup_turn_events as (
+      -- every battle where the tiered-up pet is still on the board AND still
+      -- ahead of its tier (turn before its normal unlock at 2*tier-1). This is
+      -- 1-2 battles depending on which turn it was acquired.
+      select distinct te.pet_name, te.replay_id, te.side, t.turn_number, t.outcome
+      from tierup_events te
+      join pets p on p.replay_id = te.replay_id and p.side = te.side and p.pet_name = te.pet_name
+      join turns t on t.replay_id = te.replay_id and t.turn_number = p.turn_number
+      where p.turn_number < (2 * te.tier - 1)
+    ),
+    tierup_game_agg as (
+      select
+        te.pet_name,
+        count(*)::int as games_tierup,
+        sum(case
+          when te.side = 'player' and o.outcome = 1 then 1
+          when te.side = 'opponent' and o.outcome = 2 then 1
+          else 0
+        end)::int as wins_tierup,
+        sum((o.outcome = 3)::int)::int as draws_tierup
+      from tierup_events te
+      join outcomes o on o.replay_id = te.replay_id
+      group by te.pet_name
+    ),
+    tierup_turn_agg as (
+      select
+        tte.pet_name,
+        count(*)::int as rounds_tierup,
+        sum(case
+          when tte.side = 'player' and tte.outcome = 1 then 1
+          when tte.side = 'opponent' and tte.outcome = 2 then 1
+          else 0
+        end)::int as round_wins_tierup,
+        sum((tte.outcome = 3)::int)::int as round_draws_tierup
+      from tierup_turn_events tte
+      group by tte.pet_name
+    ),
+    tierup_stats_agg as (
+      select
+        coalesce(g.pet_name, r.pet_name) as pet_name,
+        coalesce(g.games_tierup, 0)::int as games_tierup,
+        coalesce(g.wins_tierup, 0)::int as wins_tierup,
+        coalesce(g.draws_tierup, 0)::int as draws_tierup,
+        coalesce(r.rounds_tierup, 0)::int as rounds_tierup,
+        coalesce(r.round_wins_tierup, 0)::int as round_wins_tierup,
+        coalesce(r.round_draws_tierup, 0)::int as round_draws_tierup
+      from tierup_game_agg g
+      full outer join tierup_turn_agg r on r.pet_name = g.pet_name
     )
     select
       (select count(*) from base) as total_games,
@@ -784,7 +880,8 @@ export async function GET(req) {
       ) ms_row) as matchup_stats,
       (select coalesce(json_agg(row_to_json(ps) order by ps.games_with desc, ps.pet_name asc), '[]'::json) from pet_stats_agg ps where true${minEndOnPetClause}) as pet_stats,
       (select coalesce(json_agg(row_to_json(ps) order by ps.games_with desc, ps.perk_name asc), '[]'::json) from perk_stats_agg ps where true${minEndOnPerkClause}) as perk_stats,
-      (select coalesce(json_agg(row_to_json(ts) order by ts.games_with desc, ts.toy_name asc), '[]'::json) from toy_stats_agg ts where true${minEndOnToyClause}) as toy_stats
+      (select coalesce(json_agg(row_to_json(ts) order by ts.games_with desc, ts.toy_name asc), '[]'::json) from toy_stats_agg ts where true${minEndOnToyClause}) as toy_stats,
+      (select coalesce(json_agg(row_to_json(tu) order by tu.games_tierup desc, tu.pet_name asc), '[]'::json) from tierup_stats_agg tu where tu.games_tierup >= $MIN_SAMPLE_SIZE) as tierup_pet_stats
   `;
 
   const battleSql = `
@@ -802,6 +899,10 @@ export async function GET(req) {
         (${includeOpponentSideExpr}) as include_opponent_side
       from replays r
       where ${clauses.join(" and ")}
+    ),
+    pet_tiers as (
+      select pet_name, tier
+      from unnest($TIER_NAMES::text[], $TIER_VALUES::int[]) as t(pet_name, tier)
     ),
     turns_base as (
       select
@@ -903,13 +1004,22 @@ export async function GET(req) {
         tb.turn_id,
         p.pet_name,
         tb.outcome,
-        p.side
+        p.side,
+        -- curve position: pet's tier vs the tier normally available this turn
+        -- (least(6, floor((turn+1)/2))). ahead = tiered up, behind = stale.
+        case
+          when pt.tier is null then null
+          when pt.tier > least(6, (tb.turn_number + 1) / 2) then 'ahead'
+          when pt.tier = least(6, (tb.turn_number + 1) / 2) then 'on'
+          else 'behind'
+        end as curve
       from turns_base tb
       join pets p on p.replay_id = tb.replay_id and p.turn_number = tb.turn_number
       join base b on b.id = tb.replay_id
+      left join pet_tiers pt on pt.pet_name = p.pet_name
       where p.pet_name is not null ${petClause} ${petLevelClause}
       and ((p.side = 'player' and b.include_player_side) or (p.side = 'opponent' and b.include_opponent_side))
-      group by tb.turn_id, p.pet_name, tb.outcome, p.side
+      group by tb.turn_id, p.pet_name, tb.outcome, p.side, curve
     ),
     perk_rounds as (
       select
@@ -1055,7 +1165,16 @@ export async function GET(req) {
             when pr.side = 'opponent' and pr.outcome = 2 then 1
             else 0
           end)::int as wins_with,
-          sum(case when pr.outcome = 3 then 1 else 0 end)::int as draws_with
+          sum(case when pr.outcome = 3 then 1 else 0 end)::int as draws_with,
+          sum((pr.curve = 'ahead')::int)::int as ahead_games,
+          sum(case when pr.curve = 'ahead' and ((pr.side = 'player' and pr.outcome = 1) or (pr.side = 'opponent' and pr.outcome = 2)) then 1 else 0 end)::int as ahead_wins,
+          sum(case when pr.curve = 'ahead' and pr.outcome = 3 then 1 else 0 end)::int as ahead_draws,
+          sum((pr.curve = 'on')::int)::int as on_games,
+          sum(case when pr.curve = 'on' and ((pr.side = 'player' and pr.outcome = 1) or (pr.side = 'opponent' and pr.outcome = 2)) then 1 else 0 end)::int as on_wins,
+          sum(case when pr.curve = 'on' and pr.outcome = 3 then 1 else 0 end)::int as on_draws,
+          sum((pr.curve = 'behind')::int)::int as behind_games,
+          sum(case when pr.curve = 'behind' and ((pr.side = 'player' and pr.outcome = 1) or (pr.side = 'opponent' and pr.outcome = 2)) then 1 else 0 end)::int as behind_wins,
+          sum(case when pr.curve = 'behind' and pr.outcome = 3 then 1 else 0 end)::int as behind_draws
         from pet_rounds pr
         group by pr.pet_name
         order by count(*) desc, pr.pet_name asc
@@ -1087,7 +1206,8 @@ export async function GET(req) {
         from toy_rounds tr
         group by tr.toy_name
         order by count(*) desc, tr.toy_name asc
-      ) toy_stats) as toy_stats
+      ) toy_stats) as toy_stats,
+      '[]'::json as tierup_pet_stats
   `;
 
   let sql = scope === "battle" ? battleSql : baseSql;
@@ -1135,6 +1255,8 @@ export async function GET(req) {
     sql = sql.replace(/and p\.toy = any\(\$TOY\)/g, "");
   }
 
+  bindToken("$TIER_NAMES", TIER_NAMES.length ? TIER_NAMES : null);
+  bindToken("$TIER_VALUES", TIER_VALUES.length ? TIER_VALUES : null);
   bindToken("$ALLY_PET", allyPet.length ? allyPet : null);
   bindToken("$OPP_PET", opponentPet.length ? opponentPet : null);
   bindToken("$ALLY_PERK", allyPerk.length ? allyPerk : null);
@@ -1172,7 +1294,8 @@ export async function GET(req) {
     matchupStats: row.matchup_stats || [],
     petStats: row.pet_stats || [],
     perkStats: row.perk_stats || [],
-    toyStats: row.toy_stats || []
+    toyStats: row.toy_stats || [],
+    tierupPetStats: row.tierup_pet_stats || []
   };
 
   if (statsResponseCache.size >= STATS_CACHE_MAX_KEYS) {

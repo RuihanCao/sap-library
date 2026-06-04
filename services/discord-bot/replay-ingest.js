@@ -12,7 +12,10 @@ function extractParticipationId(input) {
   const text = String(input).trim();
   if (!text) return null;
 
-  const uuidRegex = /[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i;
+  // Accept any UUID version/variant. SAP v48 switched participation IDs to
+  // UUIDv7 (version nibble 7, variant outside [89ab]), so the old RFC-4122
+  // restricted pattern rejected every new replay.
+  const uuidRegex = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
   if (text.startsWith("{") && text.endsWith("}")) {
     try {
@@ -295,54 +298,32 @@ async function ingestParticipationReplay(rawParticipationId) {
       throw new Error("failed to insert replay");
     }
 
-    for (const turn of finalParsed.turns) {
+    if (finalParsed.turns.length > 0) {
+      const turnPlaceholders = finalParsed.turns.map((_, i) => {
+        const o = i * 11;
+        return `($${o+1},$${o+2},$${o+3},$${o+4},$${o+5},$${o+6},$${o+7},$${o+8},$${o+9},$${o+10},$${o+11})`;
+      }).join(",");
       await client.query(
-        `insert into turns (
-           replay_id,
-           turn_number,
-           outcome,
-           opponent_name,
-           player_lives,
-           player_gold_spent,
-           opponent_gold_spent,
-           player_rolls,
-           opponent_rolls,
-           player_summons,
-           opponent_summons
-         )
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-        [
-          replayId,
-          turn.turn_number,
-          turn.outcome,
-          turn.opponent_name,
-          turn.player_lives,
-          turn.player_gold_spent,
-          turn.opponent_gold_spent,
-          turn.player_rolls,
-          turn.opponent_rolls,
-          turn.player_summons,
-          turn.opponent_summons
-        ]
+        `insert into turns (replay_id,turn_number,outcome,opponent_name,player_lives,player_gold_spent,opponent_gold_spent,player_rolls,opponent_rolls,player_summons,opponent_summons) values ${turnPlaceholders}`,
+        finalParsed.turns.flatMap(turn => [
+          replayId, turn.turn_number, turn.outcome, turn.opponent_name,
+          turn.player_lives, turn.player_gold_spent, turn.opponent_gold_spent,
+          turn.player_rolls, turn.opponent_rolls, turn.player_summons, turn.opponent_summons
+        ])
       );
     }
 
-    for (const pet of finalParsed.pets) {
+    if (finalParsed.pets.length > 0) {
+      const petPlaceholders = finalParsed.pets.map((_, i) => {
+        const o = i * 10;
+        return `($${o+1},$${o+2},$${o+3},$${o+4},$${o+5},$${o+6},$${o+7},$${o+8},$${o+9},$${o+10})`;
+      }).join(",");
       await client.query(
-        `insert into pets (replay_id, turn_number, side, position, pet_name, level, attack, health, perk, toy)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-        [
-          replayId,
-          pet.turn_number,
-          pet.side,
-          pet.position,
-          pet.pet_name,
-          pet.level,
-          pet.attack,
-          pet.health,
-          pet.perk,
-          pet.toy
-        ]
+        `insert into pets (replay_id,turn_number,side,position,pet_name,level,attack,health,perk,toy) values ${petPlaceholders}`,
+        finalParsed.pets.flatMap(pet => [
+          replayId, pet.turn_number, pet.side, pet.position,
+          pet.pet_name, pet.level, pet.attack, pet.health, pet.perk, pet.toy
+        ])
       );
     }
 

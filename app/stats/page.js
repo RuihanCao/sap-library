@@ -3,152 +3,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { getPackSprite } from "@/lib/packSprites";
-import { fetchClientMeta } from "@/lib/clientMeta";
+import { fetchClientMetaOptions, fetchClientMetaVersions } from "@/lib/clientMeta";
+import { LoadingBar } from "@/app/components/loading-bar";
 import { SemanticLabel } from "@/app/components/semantic-label";
 import { PackMatchupInline } from "@/app/components/pack-inline";
 import { LocalProfileMarker } from "@/app/components/local-profile-marker";
-
-const BUILD_BACKGROUNDS = [
-  "AboveCloudsBuild.png",
-  "ArcticBuild.png",
-  "AutumnForestBuild.png",
-  "BeachBuild.png",
-  "BridgeBuild.png",
-  "CastleWallBuild.png",
-  "CaveBuild.png",
-  "ChildRoomBuild.png",
-  "ChristmasCabinBuild.png",
-  "ColosseumBuild.png",
-  "CornFieldBuild.png",
-  "CyberSpaceBuild.png",
-  "DesertBuild.png",
-  "DungeonBuild.png",
-  "FarmBuild.png",
-  "FieldBuild.png",
-  "FoodLandBuild.png",
-  "FrontYardBuild.png",
-  "HalloweenStreetBuild.png",
-  "InsideSecretBaseBuild.png",
-  "JungleBuild.png",
-  "LavaCaveBuild.png",
-  "LavaMountainBuild.png",
-  "LunarTempleBuild.png",
-  "MoneyBinBuild.png",
-  "MoonBuild.png",
-  "PagodaBuild.png",
-  "PlaygroundBuild.png",
-  "SavannaBuild.png",
-  "ScaryForestBuild.png",
-  "SchoolHallwayBuild.png",
-  "SewerBuild.png",
-  "SnackBinBuild.png",
-  "SnowBuild.png",
-  "SpaceStationBuild.png",
-  "UnderwaterBuild.png",
-  "UrbanCityBuild.png",
-  "WildWestTownBuild.png",
-  "WinterPineForestBuild.png",
-  "WizardSchoolBuild.png"
-];
-
-const THEMES = {
-  cool: {
-    bg: "#f3f6fb",
-    "bg-2": "#e3ebf6",
-    panel: "#f6f9ff",
-    "panel-2": "#dbe8f7",
-    surface: "#f9fbff",
-    ink: "#0f1a2a",
-    muted: "#4a5b76",
-    edge: "#c7d6ea",
-    accent: "#3aa7c9",
-    "accent-2": "#6ac2f0",
-    "accent-3": "#9ad7ff",
-    glow: "rgba(74, 175, 230, 0.22)",
-    "overlay-1": "rgba(9, 17, 34, 0.62)",
-    "overlay-2": "rgba(9, 17, 34, 0.2)"
-  },
-  warm: {
-    bg: "#fff0e3",
-    "bg-2": "#ffd8c4",
-    panel: "#fff3e9",
-    "panel-2": "#ffcaa8",
-    surface: "#fff7f0",
-    ink: "#2a1408",
-    muted: "#7a4b2f",
-    edge: "#f2b68a",
-    accent: "#ff8a3d",
-    "accent-2": "#ffb062",
-    "accent-3": "#ffd09a",
-    glow: "rgba(255, 146, 84, 0.22)",
-    "overlay-1": "rgba(40, 18, 8, 0.58)",
-    "overlay-2": "rgba(40, 18, 8, 0.22)"
-  },
-  forest: {
-    bg: "#eff6ee",
-    "bg-2": "#d7ead4",
-    panel: "#f3faf2",
-    "panel-2": "#cfe8c9",
-    surface: "#f7fbf6",
-    ink: "#122414",
-    muted: "#4c6a52",
-    edge: "#bcd8bf",
-    accent: "#3b9d64",
-    "accent-2": "#6bc489",
-    "accent-3": "#9fe2b6",
-    glow: "rgba(59, 157, 100, 0.22)",
-    "overlay-1": "rgba(9, 20, 12, 0.6)",
-    "overlay-2": "rgba(9, 20, 12, 0.2)"
-  },
-  aqua: {
-    bg: "#ecfbfb",
-    "bg-2": "#cdeff0",
-    panel: "#f0fcfd",
-    "panel-2": "#c2edf0",
-    surface: "#f7ffff",
-    ink: "#0f2a2e",
-    muted: "#4f6c73",
-    edge: "#b6dfe3",
-    accent: "#3cb4b9",
-    "accent-2": "#6dd7da",
-    "accent-3": "#9fe7ea",
-    glow: "rgba(60, 180, 185, 0.22)",
-    "overlay-1": "rgba(6, 20, 24, 0.56)",
-    "overlay-2": "rgba(6, 20, 24, 0.2)"
-  },
-  night: {
-    bg: "#eef1f7",
-    "bg-2": "#d2d8e6",
-    panel: "#f4f6fb",
-    "panel-2": "#c7d0e6",
-    surface: "#f8f9fd",
-    ink: "#141a28",
-    muted: "#515c74",
-    edge: "#b7c1d7",
-    accent: "#5b79ff",
-    "accent-2": "#7aa5ff",
-    "accent-3": "#b2c7ff",
-    glow: "rgba(91, 121, 255, 0.2)",
-    "overlay-1": "rgba(8, 12, 24, 0.66)",
-    "overlay-2": "rgba(8, 12, 24, 0.22)"
-  },
-  stone: {
-    bg: "#f2f1ef",
-    "bg-2": "#d9d4ce",
-    panel: "#f7f4ef",
-    "panel-2": "#d5cec5",
-    surface: "#faf8f5",
-    ink: "#201c18",
-    muted: "#5a524b",
-    edge: "#c8bfb5",
-    accent: "#b06b4c",
-    "accent-2": "#d2986b",
-    "accent-3": "#e5c3a1",
-    glow: "rgba(176, 107, 76, 0.2)",
-    "overlay-1": "rgba(20, 16, 12, 0.6)",
-    "overlay-2": "rgba(20, 16, 12, 0.22)"
-  }
-};
+import { BUILD_BACKGROUNDS, pickTheme } from "@/lib/themes";
 
 const EXCLUDED_PACKS = ["Custom", "Weekly"];
 const defaultSortForScope = (scope) => (scope === "battle" ? "winrate" : "pickrate");
@@ -217,28 +77,7 @@ const DEFAULT_FILTER_SECTION_VISIBILITY = {
   advanced: false
 };
 
-function pickTheme(name) {
-  const lower = name.toLowerCase();
-  if (lower.includes("arctic") || lower.includes("snow") || lower.includes("winter") || lower.includes("moon") || lower.includes("space") || lower.includes("lunar")) {
-    return THEMES.cool;
-  }
-  if (lower.includes("desert") || lower.includes("savanna") || lower.includes("wildwest") || lower.includes("lava") || lower.includes("beach") || lower.includes("snack")) {
-    return THEMES.warm;
-  }
-  if (lower.includes("underwater") || lower.includes("aquatic")) {
-    return THEMES.aqua;
-  }
-  if (lower.includes("forest") || lower.includes("jungle") || lower.includes("farm") || lower.includes("field") || lower.includes("corn") || lower.includes("frontyard")) {
-    return THEMES.forest;
-  }
-  if (lower.includes("cyber") || lower.includes("wizard") || lower.includes("pagoda") || lower.includes("castle")) {
-    return THEMES.night;
-  }
-  if (lower.includes("dungeon") || lower.includes("cave") || lower.includes("sewer") || lower.includes("bridge") || lower.includes("school") || lower.includes("moneybin")) {
-    return THEMES.stone;
-  }
-  return THEMES.forest;
-}
+
 
 function formatPct(value) {
   if (!Number.isFinite(value)) return "0.00%";
@@ -402,9 +241,13 @@ export default function StatsPage() {
     matchupStats: [],
     petStats: [],
     perkStats: [],
-    toyStats: []
+    toyStats: [],
+    tierupPetStats: []
   });
   const [loading, setLoading] = useState(false);
+  const [optionsLoading, setOptionsLoading] = useState(true);
+  const [tierupSort, setTierupSort] = useState("games");
+  const [tierupOrder, setTierupOrder] = useState("desc");
   const [petSort, setPetSort] = useState(defaultSortForScope(DEFAULT_STATS_FILTERS.scope));
   const [petOrder, setPetOrder] = useState("desc");
   const [perkSort, setPerkSort] = useState(defaultSortForScope(DEFAULT_STATS_FILTERS.scope));
@@ -422,10 +265,15 @@ export default function StatsPage() {
     matchup: false,
     pet: false,
     perk: false,
-    toy: false
+    toy: false,
+    tierup: false
   });
   const [expandedMatchupRows, setExpandedMatchupRows] = useState({});
   const [matchupPerspectiveRows, setMatchupPerspectiveRows] = useState({});
+  // Per-pet per-turn drill-down cache: pet_name -> { loading, turns, error }
+  const [petTurns, setPetTurns] = useState({});
+  // Which pet's per-turn breakdown is shown in the modal (null = closed).
+  const [petTurnsModal, setPetTurnsModal] = useState(null);
   const [shareStatus, setShareStatus] = useState("");
   const [visibleRows, setVisibleRows] = useState({
     pack: STATS_INITIAL_BATCH,
@@ -455,8 +303,32 @@ export default function StatsPage() {
   }, []);
 
   useEffect(() => {
-    fetchClientMeta().then(setMeta);
+    let alive = true;
+    // Load the static filter options first so the dropdowns populate fast,
+    // then fill in the DB-backed version list when it arrives.
+    fetchClientMetaOptions()
+      .then((opts) => {
+        if (alive) setMeta((m) => ({ ...m, ...opts }));
+      })
+      .finally(() => {
+        if (alive) setOptionsLoading(false);
+      });
+    fetchClientMetaVersions().then((v) => {
+      if (alive) setMeta((m) => ({ ...m, ...v }));
+    });
+    return () => {
+      alive = false;
+    };
   }, []);
+
+  useEffect(() => {
+    if (!petTurnsModal) return;
+    const onKey = (e) => {
+      if (e.key === "Escape") setPetTurnsModal(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [petTurnsModal]);
 
   const packOptions = useMemo(() => meta.packs.filter((pack) => !EXCLUDED_PACKS.includes(pack.name)), [meta.packs]);
   const petOptions = useMemo(() => meta.pets, [meta.pets]);
@@ -528,6 +400,42 @@ export default function StatsPage() {
     return params;
   }
 
+  function openPetTurns(petName) {
+    setPetTurnsModal(petName);
+    const current = petTurns[petName];
+    if (current?.turns) return; // already loaded for the current filters
+
+    setPetTurns((prev) => ({
+      ...prev,
+      [petName]: { ...(prev[petName] || {}), loading: true }
+    }));
+
+    const params = buildStatsParams(filters, undefined, {
+      includePet: false,
+      includePerk: false,
+      includeToy: false
+    });
+    params.set("petName", petName);
+    fetch(`/api/stats/pet-turns?${params.toString()}`)
+      .then((res) => (res.ok ? res.json() : { turns: [] }))
+      .then((data) =>
+        setPetTurns((prev) => ({
+          ...prev,
+          [petName]: { ...(prev[petName] || {}), loading: false, turns: data.turns || [] }
+        }))
+      )
+      .catch(() =>
+        setPetTurns((prev) => ({
+          ...prev,
+          [petName]: { ...(prev[petName] || {}), loading: false, turns: [], error: true }
+        }))
+      );
+  }
+
+  function closePetTurns() {
+    setPetTurnsModal(null);
+  }
+
   function syncStatsUrl(nextFilters = filters, uiState) {
     const params = buildStatsParams(nextFilters, uiState, { includePet: true });
     const nextUrl = params.toString() ? `?${params.toString()}` : window.location.pathname;
@@ -573,10 +481,13 @@ export default function StatsPage() {
         matchupStats: data.matchupStats || [],
         petStats: data.petStats || [],
         perkStats: data.perkStats || [],
-        toyStats: data.toyStats || []
+        toyStats: data.toyStats || [],
+        tierupPetStats: data.tierupPetStats || []
       });
       setExpandedMatchupRows({});
       setMatchupPerspectiveRows({});
+      setPetTurns({});
+      setPetTurnsModal(null);
 
       if (!options.skipUrlSync) {
         const urlParams = buildStatsParams(nextFilters, options.uiState, { includePet: true });
@@ -961,6 +872,49 @@ export default function StatsPage() {
       compareRows(a, b, toySort, toyOrder, stats.totalGames, "toy_name")
     );
   }, [filteredToyStats, stats.totalGames, toySort, toyOrder, toyMetaMap, itemPackFilter]);
+  const sortedTierupStats = useMemo(() => {
+    const minSampleValue = Number(filters.minSample);
+    const minSampleThreshold = Number.isFinite(minSampleValue) ? Math.max(0, minSampleValue) : 10;
+    const selectedPets = new Set(filters.pet || []);
+    const filtered = (stats.tierupPetStats || []).filter((row) => {
+      if (selectedPets.size && !selectedPets.has(row.pet_name)) return false;
+      const games = Number(row.games_tierup || 0);
+      return games >= minSampleThreshold || selectedPets.has(row.pet_name);
+    });
+    const withMeta = expandWithMeta(filtered, "pet_name", petMetaMap, tierupSort);
+    const direction = tierupOrder === "desc" ? -1 : 1;
+    const metric = (row) => {
+      const games = Number(row.games_tierup || 0);
+      const wins = Number(row.wins_tierup || 0);
+      const rounds = Number(row.rounds_tierup || 0);
+      const roundWins = Number(row.round_wins_tierup || 0);
+      switch (tierupSort) {
+        case "name":
+          return row.pet_name;
+        case "tier":
+          return row._tier ?? 999;
+        case "gameWinrate":
+          return games ? wins / games : 0;
+        case "turnWinrate":
+          return rounds ? roundWins / rounds : 0;
+        case "games":
+        default:
+          return games;
+      }
+    };
+    return withMeta.sort((a, b) => {
+      const av = metric(a);
+      const bv = metric(b);
+      let cmp = 0;
+      if (typeof av === "string" || typeof bv === "string") {
+        cmp = direction * String(av).localeCompare(String(bv));
+      } else {
+        cmp = direction * (Number(av) - Number(bv));
+      }
+      if (cmp !== 0) return cmp;
+      return String(a.pet_name || "").localeCompare(String(b.pet_name || ""));
+    });
+  }, [stats.tierupPetStats, filters.pet, filters.minSample, petMetaMap, tierupSort, tierupOrder, itemPackFilter]);
   useEffect(() => {
     setVisibleRows({
       pack: Math.min(STATS_INITIAL_BATCH, sortedPackStats.length),
@@ -1051,6 +1005,7 @@ export default function StatsPage() {
 
   return (
     <main onClick={() => setSortMenuOpen({ pet: false, perk: false, toy: false })}>
+      <LoadingBar active={loading || optionsLoading} />
       <header className="hero">
         <div className="hero-copy">
           <h1>Stats Lab</h1>
@@ -1681,6 +1636,32 @@ export default function StatsPage() {
                       <div className="rate-loss">Lossrate: {formatPct(gamesWith ? lossesWith / gamesWith : 0)}</div>
                       <div>Drawrate: {formatPct(gamesWith ? drawsWith / gamesWith : 0)}</div>
                     </div>
+                    {(() => {
+                      const aheadGames = Number(row.ahead_games || 0);
+                      const aheadWins = Number(row.ahead_wins || 0);
+                      const onGames = Number(row.on_games || 0);
+                      const onWins = Number(row.on_wins || 0);
+                      const behindGames = Number(row.behind_games || 0);
+                      const behindWins = Number(row.behind_wins || 0);
+                      if (!aheadGames && !onGames && !behindGames) return null;
+                      return (
+                        <div className="stats-card-metrics curve-breakdown">
+                          <div className="curve-label">By curve (battle winrate)</div>
+                          <div className="rate-win">
+                            Ahead: {aheadGames ? formatPct(aheadWins / aheadGames) : "—"}
+                            <span className="curve-count"> ({aheadGames})</span>
+                          </div>
+                          <div>
+                            On: {onGames ? formatPct(onWins / onGames) : "—"}
+                            <span className="curve-count"> ({onGames})</span>
+                          </div>
+                          <div className="rate-loss">
+                            Behind: {behindGames ? formatPct(behindWins / behindGames) : "—"}
+                            <span className="curve-count"> ({behindGames})</span>
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </>
                 ) : (
                   <>
@@ -1696,6 +1677,15 @@ export default function StatsPage() {
                     </div>
                   </>
                 )}
+                <div className="pet-turns">
+                  <button
+                    type="button"
+                    className="pet-turns-toggle"
+                    onClick={() => openPetTurns(row.pet_name)}
+                  >
+                    Per-turn winrate ›
+                  </button>
+                </div>
               </div>
             );
           })}
@@ -1710,6 +1700,85 @@ export default function StatsPage() {
           </div>
         )}
         </>
+        )}
+      </section>
+
+      <section className="section">
+        <div className="results-header with-inline-filter">
+          <h2>Tierup Pets</h2>
+          <p className="section-hint">
+            Winrate when a pet is acquired ahead of its tier (first seen before turn 2·tier−1, i.e. via a level-up choice).
+            Ahead-of-tier battles cover every turn the pet is still early (1–2 turns, depending on when it was grabbed).
+            {filters.scope === "battle" ? " Switch scope to Game to view." : ""}
+          </p>
+          <div className="sort-menu" onClick={(e) => e.stopPropagation()}>
+            <div className="sort-panel" style={{ position: "static", display: "flex", gap: "8px" }}>
+              <div className="field">
+                <label>Sort</label>
+                <select value={tierupSort} onChange={(e) => setTierupSort(e.target.value)}>
+                  <option value="games">Tierup Games</option>
+                  <option value="gameWinrate">Game Winrate</option>
+                  <option value="turnWinrate">Ahead-of-Tier Winrate</option>
+                  <option value="tier">Tier</option>
+                  <option value="name">Name</option>
+                </select>
+              </div>
+              <div className="field">
+                <label>Order</label>
+                <select value={tierupOrder} onChange={(e) => setTierupOrder(e.target.value)}>
+                  <option value="asc">Ascending</option>
+                  <option value="desc">Descending</option>
+                </select>
+              </div>
+            </div>
+          </div>
+          <div className="results-actions">
+            <button type="button" className="ghost" onClick={() => toggleCollapsed("tierup")}>
+              {collapsed.tierup ? "Expand" : "Collapse"}
+            </button>
+          </div>
+        </div>
+        {!collapsed.tierup && (
+        <div className={statsCardsClass}>
+          {sortedTierupStats.map((row) => {
+            const games = Number(row.games_tierup || 0);
+            const wins = Number(row.wins_tierup || 0);
+            const draws = Number(row.draws_tierup || 0);
+            const losses = Math.max(0, games - wins - draws);
+            const rounds = Number(row.rounds_tierup || 0);
+            const roundWins = Number(row.round_wins_tierup || 0);
+            const roundDraws = Number(row.round_draws_tierup || 0);
+            const roundLosses = Math.max(0, rounds - roundWins - roundDraws);
+            return (
+              <div className="stats-card" key={`${row.pet_name}-${row._pack || "all"}`}>
+                <div className="stats-card-head">
+                  {petSprite(row.pet_name) ? (
+                    <img src={petSprite(row.pet_name)} alt="" />
+                  ) : null}
+                  <h4>{row.pet_name}</h4>
+                </div>
+                <div className="stats-card-meta">
+                  <span>Tier: {row._tier ?? "?"}</span>
+                  <span>Pack: {row._pack || "Unassigned"}</span>
+                </div>
+                <div className="stats-card-meta">Tierup Games: {games}</div>
+                <div className="stats-card-metrics">
+                  <div className="rate-win">Game Winrate: {formatPct(games ? wins / games : 0)}</div>
+                  <div className="rate-loss">Game Lossrate: {formatPct(games ? losses / games : 0)}</div>
+                  {draws > 0 && <div>Game Drawrate: {formatPct(games ? draws / games : 0)}</div>}
+                  <div>Ahead-of-Tier Battles: {rounds}</div>
+                  <div className="rate-win">Ahead-of-Tier Winrate: {formatPct(rounds ? roundWins / rounds : 0)}</div>
+                  <div className="rate-loss">Ahead-of-Tier Lossrate: {formatPct(rounds ? roundLosses / rounds : 0)}</div>
+                </div>
+              </div>
+            );
+          })}
+          {sortedTierupStats.length === 0 && !loading && (
+            <div className="stats-card empty">
+              {filters.scope === "battle" ? "Switch scope to Game to view tierup stats." : "No tierup pet stats yet."}
+            </div>
+          )}
+        </div>
         )}
       </section>
 
@@ -2133,6 +2202,61 @@ export default function StatsPage() {
         </>
         )}
       </section>
+
+      {petTurnsModal && (() => {
+        const detail = petTurns[petTurnsModal] || {};
+        const turns = detail.turns || [];
+        return (
+          <div className="modal-backdrop" onClick={closePetTurns}>
+            <div className="modal pet-turns-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-head">
+                <h3 className="pet-turns-modal-title">
+                  {petSprite(petTurnsModal) ? (
+                    <img src={petSprite(petTurnsModal)} alt="" />
+                  ) : null}
+                  <span>{petTurnsModal} · per-turn winrate</span>
+                </h3>
+                <div className="modal-head-actions">
+                  <button className="ghost" type="button" onClick={closePetTurns}>Close</button>
+                </div>
+              </div>
+              {detail.loading && <div className="muted">Loading…</div>}
+              {!detail.loading && turns.length === 0 && (
+                <div className="muted">No turn data for these filters.</div>
+              )}
+              {!detail.loading && turns.length > 0 && (
+                <div className="pet-turns-table-wrap">
+                  <table className="pet-turns-table">
+                    <thead>
+                      <tr>
+                        <th>Turn</th>
+                        <th>Rnds</th>
+                        <th>Win</th>
+                        <th>Loss</th>
+                        <th>Draw</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {turns.map((t) => {
+                        const r = Number(t.rounds || 0);
+                        return (
+                          <tr key={t.turn_number}>
+                            <td>{t.turn_number}</td>
+                            <td>{r}</td>
+                            <td className="rate-win">{r ? formatPct(Number(t.wins || 0) / r) : "—"}</td>
+                            <td className="rate-loss">{r ? formatPct(Number(t.losses || 0) / r) : "—"}</td>
+                            <td>{r ? formatPct(Number(t.draws || 0) / r) : "—"}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
     </main>
   );
 }

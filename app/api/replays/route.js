@@ -12,7 +12,7 @@ function extractParticipationId(input) {
   const text = String(input).trim();
   if (!text) return null;
 
-  const uuidRegex = /[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i;
+  const uuidRegex = /[0-9a-f]{8}-[0-9a-f]{4}-[1-9a-f][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i;
 
   if (text.startsWith("{") && text.endsWith("}")) {
     try {
@@ -288,54 +288,32 @@ export async function POST(req) {
       throw new Error("failed to insert replay");
     }
 
-    for (const t of finalParsed.turns) {
+    if (finalParsed.turns.length > 0) {
+      const turnPlaceholders = finalParsed.turns.map((_, i) => {
+        const o = i * 11;
+        return `($${o+1},$${o+2},$${o+3},$${o+4},$${o+5},$${o+6},$${o+7},$${o+8},$${o+9},$${o+10},$${o+11})`;
+      }).join(",");
       await client.query(
-        `insert into turns (
-           replay_id,
-           turn_number,
-           outcome,
-           opponent_name,
-           player_lives,
-           player_gold_spent,
-           opponent_gold_spent,
-           player_rolls,
-           opponent_rolls,
-           player_summons,
-           opponent_summons
-         )
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-        [
-          replayId,
-          t.turn_number,
-          t.outcome,
-          t.opponent_name,
-          t.player_lives,
-          t.player_gold_spent,
-          t.opponent_gold_spent,
-          t.player_rolls,
-          t.opponent_rolls,
-          t.player_summons,
-          t.opponent_summons
-        ]
+        `insert into turns (replay_id,turn_number,outcome,opponent_name,player_lives,player_gold_spent,opponent_gold_spent,player_rolls,opponent_rolls,player_summons,opponent_summons) values ${turnPlaceholders}`,
+        finalParsed.turns.flatMap(t => [
+          replayId, t.turn_number, t.outcome, t.opponent_name,
+          t.player_lives, t.player_gold_spent, t.opponent_gold_spent,
+          t.player_rolls, t.opponent_rolls, t.player_summons, t.opponent_summons
+        ])
       );
     }
 
-    for (const p of finalParsed.pets) {
+    if (finalParsed.pets.length > 0) {
+      const petPlaceholders = finalParsed.pets.map((_, i) => {
+        const o = i * 10;
+        return `($${o+1},$${o+2},$${o+3},$${o+4},$${o+5},$${o+6},$${o+7},$${o+8},$${o+9},$${o+10})`;
+      }).join(",");
       await client.query(
-        `insert into pets (replay_id, turn_number, side, position, pet_name, level, attack, health, perk, toy)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-        [
-          replayId,
-          p.turn_number,
-          p.side,
-          p.position,
-          p.pet_name,
-          p.level,
-          p.attack,
-          p.health,
-          p.perk,
-          p.toy
-        ]
+        `insert into pets (replay_id,turn_number,side,position,pet_name,level,attack,health,perk,toy) values ${petPlaceholders}`,
+        finalParsed.pets.flatMap(p => [
+          replayId, p.turn_number, p.side, p.position,
+          p.pet_name, p.level, p.attack, p.health, p.perk, p.toy
+        ])
       );
     }
 
