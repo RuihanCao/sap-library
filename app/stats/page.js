@@ -91,6 +91,16 @@ function formatTurns(value) {
   return parsed.toFixed(2);
 }
 
+// Weighted Edge Score: (buyWinrate - 0.50) × appearanceRate, scaled ×100 for display.
+function computeEdgeScore(buyWinrate, appearanceRate) {
+  const wes = (buyWinrate - 0.5) * appearanceRate;
+  const display = Number((wes * 100).toFixed(2));
+  return {
+    label: `${display > 0 ? "+" : ""}${display.toFixed(2)}`,
+    className: display > 0 ? "rate-win" : display < 0 ? "rate-loss" : "rate-neutral"
+  };
+}
+
 function IconSelect({ label, options, value, onChange, placeholder }) {
   const [search, setSearch] = useState(value || "");
   const [open, setOpen] = useState(false);
@@ -672,6 +682,7 @@ export default function StatsPage() {
   const toyMetaMap = useMemo(() => new Map((toyOptions || []).map((entry) => [entry.name, entry])), [toyOptions]);
   const itemPackFilter = filters.itemPack || "";
   const appearanceLabel = filters.scope === "battle" ? "Round Share" : "Appearance Rate";
+  const isMirrorMatchup = Boolean(filters.pack) && filters.pack === filters.opponentPack;
   const itemSortOptions = filters.scope === "battle"
     ? [
         { value: "name", label: "Name" },
@@ -695,6 +706,16 @@ export default function StatsPage() {
         { value: "endWinrate", label: "Winrate (End)" },
         { value: "endLossrate", label: "Lossrate (End)" }
       ];
+  // Edge Score only exists on pet cards in the mirror-matchup game view.
+  const showEdgeScore = filters.scope === "game" && isMirrorMatchup;
+  const petSortOptions = showEdgeScore
+    ? [...itemSortOptions, { value: "edgeScore", label: "Edge Score" }]
+    : itemSortOptions;
+  useEffect(() => {
+    if (petSort === "edgeScore" && !showEdgeScore) {
+      setPetSort(defaultSortForScope(filters.scope));
+    }
+  }, [petSort, showEdgeScore, filters.scope]);
   const expandWithMeta = (rows, nameKey, metaMap, sortMetric) => {
     const duplicateByPack = sortMetric === "pack";
     const result = [];
@@ -755,6 +776,11 @@ export default function StatsPage() {
           return gamesWith ? winsWith / gamesWith : 0;
         case "buyLossrate":
           return gamesWith ? lossesWith / gamesWith : 0;
+        case "edgeScore": {
+          const buyWinrate = gamesWith ? winsWith / gamesWith : 0;
+          const appearanceRate = games ? gamesWith / games : 0;
+          return (buyWinrate - 0.5) * appearanceRate;
+        }
         case "endCount":
           return gamesEnd;
         case "endRate":
@@ -1582,7 +1608,7 @@ export default function StatsPage() {
                       }
                     }}
                   >
-                    {itemSortOptions.map((opt) => (
+                    {petSortOptions.map((opt) => (
                       <option key={opt.value} value={opt.value}>{opt.label}</option>
                     ))}
                   </select>
@@ -1670,6 +1696,13 @@ export default function StatsPage() {
                       <div>{appearanceLabel}: {formatPct(games ? gamesWith / games : 0)}</div>
                       <div className="rate-win">Winrate (Buy): {formatPct(gamesWith ? winsWith / gamesWith : 0)}</div>
                       <div className="rate-loss">Lossrate (Buy): {formatPct(gamesWith ? lossesWith / gamesWith : 0)}</div>
+                      {isMirrorMatchup && (() => {
+                        const edge = computeEdgeScore(
+                          gamesWith ? winsWith / gamesWith : 0,
+                          games ? gamesWith / games : 0
+                        );
+                        return <div className={edge.className}>Edge Score: {edge.label}</div>;
+                      })()}
                       <div>End: {gamesEnd}</div>
                       <div>End Rate: {formatPct(games ? gamesEnd / games : 0)}</div>
                       <div className="rate-win">Winrate (End): {formatPct(gamesEnd ? winsEnd / gamesEnd : 0)}</div>

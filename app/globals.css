@@ -101,6 +101,10 @@ p {
   color: var(--rate-loss);
 }
 
+.rate-neutral {
+  color: var(--muted);
+}
+
 .gold-text,
 .label.gold-text {
   color: #6d560f;
