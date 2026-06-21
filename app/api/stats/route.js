@@ -306,6 +306,64 @@ export async function GET(req) {
     clauses.push(`((${includePlayerSideExpr}) or (${includeOpponentSideExpr}))`);
   }
 
+  // When a specific matchup is selected (both packs set) we expose per-pet
+  // winrate split by which pack's side the pet was on, plus each pack's overall
+  // winrate in the matchup. The frontend turns this into the crosspack "Win
+  // Lift" / "Pack Edge" metrics: how much a pet lifts a pack's win chance above
+  // that pack's default winrate in the matchup. Combined (both-side) pet stats
+  // can't answer this because they mix a shared pet's record on both sides.
+  const matchupSelected = Boolean(pack && opponentPack);
+  const matchupPetEdgeCte = matchupSelected
+    ? `,
+    matchup_pet_side as (
+      select pa.pet_name, b.pack as side_pack,
+        (o.outcome = 1)::int as is_win,
+        (o.outcome = 3)::int as is_draw
+      from pet_any pa
+      join base b on b.id = pa.id
+      join outcomes o on o.replay_id = pa.id
+      where b.include_player_side
+      union all
+      select pa.pet_name, b.opponent_pack as side_pack,
+        (o.outcome = 2)::int as is_win,
+        (o.outcome = 3)::int as is_draw
+      from opp_pet_any pa
+      join base b on b.id = pa.id
+      join outcomes o on o.replay_id = pa.id
+      where b.include_opponent_side
+    ),
+    matchup_pet_edge_agg as (
+      select
+        pet_name,
+        side_pack as pack,
+        count(*)::int as games_with,
+        sum(is_win)::int as wins_with,
+        sum(is_draw)::int as draws_with
+      from matchup_pet_side
+      group by pet_name, side_pack
+    ),
+    matchup_pack_baseline_agg as (
+      select
+        cp.pack as pack,
+        count(*)::int as games,
+        sum(case
+          when cp.side = 'player' and cp.outcome = 1 then 1
+          when cp.side = 'opponent' and cp.outcome = 2 then 1
+          else 0
+        end)::int as wins,
+        sum((cp.outcome = 3)::int)::int as draws
+      from combined_pack cp
+      group by cp.pack
+    )`
+    : "";
+  const matchupPetEdgeSelect = matchupSelected
+    ? `,
+      (select coalesce(json_agg(row_to_json(mpe) order by mpe.games_with desc, mpe.pet_name asc), '[]'::json) from matchup_pet_edge_agg mpe) as matchup_pet_edge,
+      (select coalesce(json_agg(row_to_json(mpb) order by mpb.pack asc), '[]'::json) from matchup_pack_baseline_agg mpb) as matchup_pack_baseline`
+    : `,
+      '[]'::json as matchup_pet_edge,
+      '[]'::json as matchup_pack_baseline`;
+
   const baseSql = `
     with base as (
       select
@@ -861,7 +919,7 @@ export async function GET(req) {
         coalesce(r.round_draws_tierup, 0)::int as round_draws_tierup
       from tierup_game_agg g
       full outer join tierup_turn_agg r on r.pet_name = g.pet_name
-    )
+    )${matchupPetEdgeCte}
     select
       (select count(*) from base) as total_games,
       (select count(*) from turns t join base b on b.id = t.replay_id) as total_battles,
@@ -881,7 +939,7 @@ export async function GET(req) {
       (select coalesce(json_agg(row_to_json(ps) order by ps.games_with desc, ps.pet_name asc), '[]'::json) from pet_stats_agg ps where true${minEndOnPetClause}) as pet_stats,
       (select coalesce(json_agg(row_to_json(ps) order by ps.games_with desc, ps.perk_name asc), '[]'::json) from perk_stats_agg ps where true${minEndOnPerkClause}) as perk_stats,
       (select coalesce(json_agg(row_to_json(ts) order by ts.games_with desc, ts.toy_name asc), '[]'::json) from toy_stats_agg ts where true${minEndOnToyClause}) as toy_stats,
-      (select coalesce(json_agg(row_to_json(tu) order by tu.games_tierup desc, tu.pet_name asc), '[]'::json) from tierup_stats_agg tu where tu.games_tierup >= $MIN_SAMPLE_SIZE) as tierup_pet_stats
+      (select coalesce(json_agg(row_to_json(tu) order by tu.games_tierup desc, tu.pet_name asc), '[]'::json) from tierup_stats_agg tu where tu.games_tierup >= $MIN_SAMPLE_SIZE) as tierup_pet_stats${matchupPetEdgeSelect}
   `;
 
   const battleSql = `
@@ -1207,7 +1265,9 @@ export async function GET(req) {
         group by tr.toy_name
         order by count(*) desc, tr.toy_name asc
       ) toy_stats) as toy_stats,
-      '[]'::json as tierup_pet_stats
+      '[]'::json as tierup_pet_stats,
+      '[]'::json as matchup_pet_edge,
+      '[]'::json as matchup_pack_baseline
   `;
 
   let sql = scope === "battle" ? battleSql : baseSql;
@@ -1295,7 +1355,9 @@ export async function GET(req) {
     petStats: row.pet_stats || [],
     perkStats: row.perk_stats || [],
     toyStats: row.toy_stats || [],
-    tierupPetStats: row.tierup_pet_stats || []
+    tierupPetStats: row.tierup_pet_stats || [],
+    matchupPetEdge: row.matchup_pet_edge || [],
+    matchupPackBaseline: row.matchup_pack_baseline || []
   };
 
   if (statsResponseCache.size >= STATS_CACHE_MAX_KEYS) {

@@ -101,6 +101,26 @@ function computeEdgeScore(buyWinrate, appearanceRate) {
   };
 }
 
+// Crosspack metrics. The "default" win chance in a cross-pack matchup isn't 50%
+// like a mirror — it's the pack's own winrate in that matchup (packBaseline).
+// Win Lift = how many percentage points the pet adds on top of that baseline.
+// Pack Edge = that lift weighted by how often the pack actually runs the pet,
+// the cross-pack analogue of Edge Score (where the baseline is the 50% mirror).
+function formatWinLift(petWinrate, packBaseline) {
+  const display = Number(((petWinrate - packBaseline) * 100).toFixed(1));
+  return {
+    label: `${display > 0 ? "+" : ""}${display.toFixed(1)} pp`,
+    className: display > 0 ? "rate-win" : display < 0 ? "rate-loss" : "rate-neutral"
+  };
+}
+function formatPackEdge(petWinrate, packBaseline, appearanceRate) {
+  const display = Number(((petWinrate - packBaseline) * appearanceRate * 100).toFixed(2));
+  return {
+    label: `${display > 0 ? "+" : ""}${display.toFixed(2)}`,
+    className: display > 0 ? "rate-win" : display < 0 ? "rate-loss" : "rate-neutral"
+  };
+}
+
 function IconSelect({ label, options, value, onChange, placeholder }) {
   const [search, setSearch] = useState(value || "");
   const [open, setOpen] = useState(false);
@@ -252,7 +272,9 @@ export default function StatsPage() {
     petStats: [],
     perkStats: [],
     toyStats: [],
-    tierupPetStats: []
+    tierupPetStats: [],
+    matchupPetEdge: [],
+    matchupPackBaseline: []
   });
   const [loading, setLoading] = useState(false);
   const [optionsLoading, setOptionsLoading] = useState(true);
@@ -276,7 +298,9 @@ export default function StatsPage() {
     pet: false,
     perk: false,
     toy: false,
-    tierup: false
+    tierup: false,
+    buysell: false,
+    food: false
   });
   const [expandedMatchupRows, setExpandedMatchupRows] = useState({});
   const [matchupPerspectiveRows, setMatchupPerspectiveRows] = useState({});
@@ -284,6 +308,20 @@ export default function StatsPage() {
   const [petTurns, setPetTurns] = useState({});
   // Which pet's per-turn breakdown is shown in the modal (null = closed).
   const [petTurnsModal, setPetTurnsModal] = useState(null);
+  // Player-action stats (buys/sells/consumables) from /api/stats/actions. These
+  // are player-POV only and load in parallel with the main board stats.
+  const [actionStats, setActionStats] = useState({
+    totalGames: 0,
+    summary: {},
+    petActionStats: [],
+    foodPetStats: [],
+    foodNameStats: []
+  });
+  const [actionLoading, setActionLoading] = useState(false);
+  const [buysellSort, setBuysellSort] = useState("bought");
+  const [foodSort, setFoodSort] = useState("fed");
+  const [buysellLimit, setBuysellLimit] = useState(60);
+  const [foodLimit, setFoodLimit] = useState(60);
   const [shareStatus, setShareStatus] = useState("");
   const [visibleRows, setVisibleRows] = useState({
     pack: STATS_INITIAL_BATCH,
@@ -472,12 +510,32 @@ export default function StatsPage() {
     return params.toString();
   }
 
+  async function loadActionStats(params) {
+    setActionLoading(true);
+    try {
+      const res = await fetch(`/api/stats/actions?${params.toString()}`);
+      const data = await res.json();
+      setActionStats({
+        totalGames: data.totalGames || 0,
+        summary: data.summary || {},
+        petActionStats: data.petActionStats || [],
+        foodPetStats: data.foodPetStats || [],
+        foodNameStats: data.foodNameStats || []
+      });
+    } catch {
+      setActionStats({ totalGames: 0, summary: {}, petActionStats: [], foodPetStats: [], foodNameStats: [] });
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
   async function loadStats(nextFilters = filters, options = {}) {
     const params = options.paramsOverride
       ? new URLSearchParams(options.paramsOverride.toString())
       : buildStatsParams(nextFilters, options.uiState, { includePet: false, includePerk: false, includeToy: false });
 
     lastAppliedNetworkKeyRef.current = buildNetworkFilterKey(nextFilters);
+    loadActionStats(params);
     setLoading(true);
     try {
       const res = await fetch(`/api/stats?${params.toString()}`);
@@ -492,7 +550,9 @@ export default function StatsPage() {
         petStats: data.petStats || [],
         perkStats: data.perkStats || [],
         toyStats: data.toyStats || [],
-        tierupPetStats: data.tierupPetStats || []
+        tierupPetStats: data.tierupPetStats || [],
+        matchupPetEdge: data.matchupPetEdge || [],
+        matchupPackBaseline: data.matchupPackBaseline || []
       });
       setExpandedMatchupRows({});
       setMatchupPerspectiveRows({});
@@ -680,9 +740,32 @@ export default function StatsPage() {
   const petMetaMap = useMemo(() => new Map((petOptions || []).map((entry) => [entry.name, entry])), [petOptions]);
   const perkMetaMap = useMemo(() => new Map((perkOptions || []).map((entry) => [entry.name, entry])), [perkOptions]);
   const toyMetaMap = useMemo(() => new Map((toyOptions || []).map((entry) => [entry.name, entry])), [toyOptions]);
+  // Per-pack baseline winrate within the selected matchup (the "default" a pet
+  // is measured against), keyed by pack name.
+  const crosspackBaselineMap = useMemo(() => {
+    const map = new Map();
+    for (const row of stats.matchupPackBaseline || []) {
+      const games = Number(row.games || 0);
+      if (!games) continue;
+      map.set(row.pack, { winrate: Number(row.wins || 0) / games, games });
+    }
+    return map;
+  }, [stats.matchupPackBaseline]);
+  // Per-pet winrate split by which pack's side it was on, keyed by "pet__pack".
+  const crosspackPetEdgeMap = useMemo(() => {
+    const map = new Map();
+    for (const row of stats.matchupPetEdge || []) {
+      map.set(`${row.pet_name}__${row.pack}`, {
+        games: Number(row.games_with || 0),
+        wins: Number(row.wins_with || 0)
+      });
+    }
+    return map;
+  }, [stats.matchupPetEdge]);
   const itemPackFilter = filters.itemPack || "";
   const appearanceLabel = filters.scope === "battle" ? "Round Share" : "Appearance Rate";
   const isMirrorMatchup = Boolean(filters.pack) && filters.pack === filters.opponentPack;
+  const isCrosspackMatchup = Boolean(filters.pack && filters.opponentPack) && filters.pack !== filters.opponentPack;
   const itemSortOptions = filters.scope === "battle"
     ? [
         { value: "name", label: "Name" },
@@ -708,14 +791,20 @@ export default function StatsPage() {
       ];
   // Edge Score only exists on pet cards in the mirror-matchup game view.
   const showEdgeScore = filters.scope === "game" && isMirrorMatchup;
+  // Win Lift / Pack Edge replace it in the cross-pack game view.
+  const showCrosspackEdge = filters.scope === "game" && isCrosspackMatchup;
   const petSortOptions = showEdgeScore
     ? [...itemSortOptions, { value: "edgeScore", label: "Edge Score" }]
+    : showCrosspackEdge
+    ? [...itemSortOptions, { value: "winLift", label: "Win Lift" }, { value: "packEdge", label: "Pack Edge" }]
     : itemSortOptions;
   useEffect(() => {
     if (petSort === "edgeScore" && !showEdgeScore) {
       setPetSort(defaultSortForScope(filters.scope));
+    } else if ((petSort === "winLift" || petSort === "packEdge") && !showCrosspackEdge) {
+      setPetSort(defaultSortForScope(filters.scope));
     }
-  }, [petSort, showEdgeScore, filters.scope]);
+  }, [petSort, showEdgeScore, showCrosspackEdge, filters.scope]);
   const expandWithMeta = (rows, nameKey, metaMap, sortMetric) => {
     const duplicateByPack = sortMetric === "pack";
     const result = [];
@@ -781,6 +870,10 @@ export default function StatsPage() {
           const appearanceRate = games ? gamesWith / games : 0;
           return (buyWinrate - 0.5) * appearanceRate;
         }
+        case "winLift":
+          return Number.isFinite(row._winLift) ? row._winLift : Number.NEGATIVE_INFINITY;
+        case "packEdge":
+          return Number.isFinite(row._packEdge) ? row._packEdge : Number.NEGATIVE_INFINITY;
         case "endCount":
           return gamesEnd;
         case "endRate":
@@ -884,10 +977,44 @@ export default function StatsPage() {
     });
   }, [stats.toyStats, filters.toy, filters.minSample]);
   const sortedPetStats = useMemo(() => {
-    return expandWithMeta(filteredPetStats, "pet_name", petMetaMap, petSort).sort((a, b) =>
+    const expanded = expandWithMeta(filteredPetStats, "pet_name", petMetaMap, petSort);
+    if (showCrosspackEdge) {
+      const selectedPacks = [filters.pack, filters.opponentPack];
+      for (const row of expanded) {
+        let usePack = row._pack;
+        let side = crosspackPetEdgeMap.get(`${row.pet_name}__${usePack}`);
+        let base = crosspackBaselineMap.get(usePack);
+        // If the card's pack tag isn't one of the two matchup packs (a pet shared
+        // with a third pack), fall back to whichever selected pack it appeared on.
+        if (!(side && side.games > 0 && base)) {
+          for (const p of selectedPacks) {
+            const s = crosspackPetEdgeMap.get(`${row.pet_name}__${p}`);
+            const b = crosspackBaselineMap.get(p);
+            if (s && s.games > 0 && b) {
+              usePack = p;
+              side = s;
+              base = b;
+              break;
+            }
+          }
+        }
+        if (side && side.games > 0 && base) {
+          const petWinrate = side.wins / side.games;
+          const appearance = base.games ? side.games / base.games : 0;
+          row._edgePack = usePack;
+          row._sidePetWinrate = petWinrate;
+          row._sidePackBaseline = base.winrate;
+          row._sideGames = side.games;
+          row._appearance = appearance;
+          row._winLift = petWinrate - base.winrate;
+          row._packEdge = (petWinrate - base.winrate) * appearance * 100;
+        }
+      }
+    }
+    return expanded.sort((a, b) =>
       compareRows(a, b, petSort, petOrder, stats.totalGames, "pet_name")
     );
-  }, [filteredPetStats, stats.totalGames, petSort, petOrder, petMetaMap, itemPackFilter]);
+  }, [filteredPetStats, stats.totalGames, petSort, petOrder, petMetaMap, itemPackFilter, showCrosspackEdge, crosspackPetEdgeMap, crosspackBaselineMap, filters.pack, filters.opponentPack]);
   const sortedPerkStats = useMemo(() => {
     return expandWithMeta(filteredPerkStats, "perk_name", perkMetaMap, perkSort).sort((a, b) =>
       compareRows(a, b, perkSort, perkOrder, stats.totalGames, "perk_name")
@@ -1009,6 +1136,33 @@ export default function StatsPage() {
     () => sortedMatchupStats.slice(0, visibleRows.matchup),
     [sortedMatchupStats, visibleRows.matchup]
   );
+
+  const sortedBuysell = useMemo(() => {
+    const rows = [...(actionStats.petActionStats || [])];
+    const rate = (w, g) => (g > 0 ? w / g : 0);
+    const metric = {
+      bought: (r) => Number(r.games_bought || 0),
+      buywinrate: (r) => rate(Number(r.wins_bought || 0), Number(r.games_bought || 0)),
+      churn: (r) => rate(Number(r.games_churned || 0), Number(r.games_bought || 0)),
+      sold: (r) => Number(r.games_sold || 0),
+      copies: (r) => rate(Number(r.total_buys || 0), Number(r.games_bought || 0))
+    }[buysellSort] || ((r) => Number(r.games_bought || 0));
+    return rows.sort((a, b) => metric(b) - metric(a) || String(a.pet_name).localeCompare(String(b.pet_name)));
+  }, [actionStats.petActionStats, buysellSort]);
+
+  const sortedFoodPets = useMemo(() => {
+    const rows = [...(actionStats.foodPetStats || [])];
+    const rate = (w, g) => (g > 0 ? w / g : 0);
+    const metric = {
+      fed: (r) => Number(r.games_fed || 0),
+      fedwinrate: (r) => rate(Number(r.wins_fed || 0), Number(r.games_fed || 0)),
+      times: (r) => Number(r.times_fed || 0)
+    }[foodSort] || ((r) => Number(r.games_fed || 0));
+    return rows.sort((a, b) => metric(b) - metric(a) || String(a.pet_name).localeCompare(String(b.pet_name)));
+  }, [actionStats.foodPetStats, foodSort]);
+
+  const visibleBuysell = useMemo(() => sortedBuysell.slice(0, buysellLimit), [sortedBuysell, buysellLimit]);
+  const visibleFoodPets = useMemo(() => sortedFoodPets.slice(0, foodLimit), [sortedFoodPets, foodLimit]);
   const totalPetCount = useMemo(
     () => (filteredPetStats || []).reduce((sum, row) => sum + Number(row.games_with || 0), 0),
     [filteredPetStats]
@@ -1631,6 +1785,13 @@ export default function StatsPage() {
         </div>
         {!collapsed.pet && (
         <>
+        {showCrosspackEdge && (
+          <p className="section-hint" style={{ marginTop: 0 }}>
+            <strong>Win Lift</strong> = percentage points a pet adds to its pack&apos;s win rate over the
+            pack&apos;s average in this matchup. <strong>Pack Edge</strong> multiplies that lift by how often
+            the pack runs the pet, so a pet that helps and shows up often ranks above a niche one.
+          </p>
+        )}
         <div className={statsCardsClass}>
           {visiblePetStats.map((row) => {
             const games = Number(stats.totalGames || 0);
@@ -1702,6 +1863,19 @@ export default function StatsPage() {
                           games ? gamesWith / games : 0
                         );
                         return <div className={edge.className}>Edge Score: {edge.label}</div>;
+                      })()}
+                      {isCrosspackMatchup && (() => {
+                        if (!Number.isFinite(row._winLift)) {
+                          return <div className="rate-neutral">Win Lift: <span className="curve-count">not enough data</span></div>;
+                        }
+                        const lift = formatWinLift(row._sidePetWinrate, row._sidePackBaseline);
+                        const edge = formatPackEdge(row._sidePetWinrate, row._sidePackBaseline, row._appearance);
+                        return (
+                          <>
+                            <div className={lift.className}>Win Lift: {lift.label}</div>
+                            <div className={edge.className}>Pack Edge: {edge.label}</div>
+                          </>
+                        );
                       })()}
                       <div>End: {gamesEnd}</div>
                       <div>End Rate: {formatPct(games ? gamesEnd / games : 0)}</div>
@@ -2076,6 +2250,182 @@ export default function StatsPage() {
             <div className="page-info">{visibleToyStats.length} / {sortedToyStats.length}</div>
             <div ref={toySentinelRef} className="list-sentinel" />
           </div>
+        )}
+        </>
+        )}
+      </section>
+
+      <section className="section">
+        <div className="results-header with-inline-filter">
+          <h2>Buys &amp; Sells</h2>
+          <div className="section-inline-filter">
+            <div className="field">
+              <label>Sort</label>
+              <select
+                value={buysellSort}
+                onChange={(e) => { setBuysellSort(e.target.value); setBuysellLimit(60); }}
+              >
+                <option value="bought">Most Bought</option>
+                <option value="buywinrate">Buy Winrate</option>
+                <option value="churn">Churn (Sold After Buy)</option>
+                <option value="copies">Copies / Game</option>
+                <option value="sold">Most Sold</option>
+              </select>
+            </div>
+          </div>
+          <div className="results-actions">
+            <button type="button" className="ghost" onClick={() => toggleCollapsed("buysell")}>
+              {collapsed.buysell ? "Expand" : "Collapse"}
+            </button>
+          </div>
+        </div>
+        {!collapsed.buysell && (
+        <>
+        <p className="section-hint" style={{ marginTop: 0 }}>
+          What players actually <strong>buy</strong> and <strong>sell</strong> in the shop — independent of
+          what ends up on the final board. Player point-of-view only.{" "}
+          {actionLoading ? "Loading…" : `${actionStats.totalGames} games.`}
+        </p>
+        <div className={statsCardsClass}>
+          {visibleBuysell.map((row) => {
+            const totalGames = Number(actionStats.totalGames || 0);
+            const gamesBought = Number(row.games_bought || 0);
+            const totalBuys = Number(row.total_buys || 0);
+            const winsBought = Number(row.wins_bought || 0);
+            const drawsBought = Number(row.draws_bought || 0);
+            const lossesBought = Math.max(0, gamesBought - winsBought - drawsBought);
+            const gamesSold = Number(row.games_sold || 0);
+            const totalSells = Number(row.total_sells || 0);
+            const gamesChurned = Number(row.games_churned || 0);
+            return (
+              <div className="stats-card" key={`buysell-${row.pet_name}`}>
+                <div className="stats-card-head">
+                  {petSprite(row.pet_name) ? <img src={petSprite(row.pet_name)} alt="" /> : null}
+                  <h4>{row.pet_name}</h4>
+                </div>
+                <div className="stats-card-meta">Bought in {gamesBought} games</div>
+                <div className="stats-card-metrics">
+                  <div>Buy Rate: {formatPct(totalGames ? gamesBought / totalGames : 0)}</div>
+                  <div className="rate-win">Winrate (Bought): {formatPct(gamesBought ? winsBought / gamesBought : 0)}</div>
+                  <div className="rate-loss">Lossrate (Bought): {formatPct(gamesBought ? lossesBought / gamesBought : 0)}</div>
+                  <div>Copies / Game: {gamesBought ? (totalBuys / gamesBought).toFixed(2) : "0.00"}</div>
+                  <div>Sold: {gamesSold} games ({totalSells})</div>
+                  <div>Churn (Sold After Buy): {formatPct(gamesBought ? gamesChurned / gamesBought : 0)}</div>
+                </div>
+              </div>
+            );
+          })}
+          {sortedBuysell.length === 0 && !actionLoading && (
+            <div className="stats-card empty">No buy/sell stats yet.</div>
+          )}
+        </div>
+        {sortedBuysell.length > visibleBuysell.length && (
+          <div className="infinite-footer">
+            <div className="page-info">{visibleBuysell.length} / {sortedBuysell.length}</div>
+            <button type="button" className="ghost" onClick={() => setBuysellLimit((n) => n + 60)}>Show more</button>
+          </div>
+        )}
+        </>
+        )}
+      </section>
+
+      <section className="section">
+        <div className="results-header with-inline-filter">
+          <h2>Consumables</h2>
+          <div className="section-inline-filter">
+            <div className="field">
+              <label>Sort</label>
+              <select
+                value={foodSort}
+                onChange={(e) => { setFoodSort(e.target.value); setFoodLimit(60); }}
+              >
+                <option value="fed">Most Fed</option>
+                <option value="fedwinrate">Fed Winrate</option>
+                <option value="times">Total Feeds</option>
+              </select>
+            </div>
+          </div>
+          <div className="results-actions">
+            <button type="button" className="ghost" onClick={() => toggleCollapsed("food")}>
+              {collapsed.food ? "Expand" : "Collapse"}
+            </button>
+          </div>
+        </div>
+        {!collapsed.food && (
+        <>
+        <p className="section-hint" style={{ marginTop: 0 }}>
+          Which pets get fed consumables, and the winrate when they do. Player point-of-view only.
+          {(() => {
+            const s = actionStats.summary || {};
+            const tf = Number(s.totalFoods || 0);
+            const tg = Number(actionStats.totalGames || 0);
+            return ` ${tf} consumables across ${tg} games (${tg ? (tf / tg).toFixed(2) : "0.00"} per game).`;
+          })()}
+        </p>
+        <div className={statsCardsClass}>
+          {visibleFoodPets.map((row) => {
+            const totalGames = Number(actionStats.totalGames || 0);
+            const gamesFed = Number(row.games_fed || 0);
+            const timesFed = Number(row.times_fed || 0);
+            const winsFed = Number(row.wins_fed || 0);
+            const drawsFed = Number(row.draws_fed || 0);
+            const lossesFed = Math.max(0, gamesFed - winsFed - drawsFed);
+            return (
+              <div className="stats-card" key={`foodpet-${row.pet_name}`}>
+                <div className="stats-card-head">
+                  {petSprite(row.pet_name) ? <img src={petSprite(row.pet_name)} alt="" /> : null}
+                  <h4>{row.pet_name}</h4>
+                </div>
+                <div className="stats-card-meta">Fed in {gamesFed} games ({timesFed} feeds)</div>
+                <div className="stats-card-metrics">
+                  <div>Fed Rate: {formatPct(totalGames ? gamesFed / totalGames : 0)}</div>
+                  <div className="rate-win">Winrate (Fed): {formatPct(gamesFed ? winsFed / gamesFed : 0)}</div>
+                  <div className="rate-loss">Lossrate (Fed): {formatPct(gamesFed ? lossesFed / gamesFed : 0)}</div>
+                </div>
+              </div>
+            );
+          })}
+          {sortedFoodPets.length === 0 && !actionLoading && (
+            <div className="stats-card empty">No consumable stats yet.</div>
+          )}
+        </div>
+        {sortedFoodPets.length > visibleFoodPets.length && (
+          <div className="infinite-footer">
+            <div className="page-info">{visibleFoodPets.length} / {sortedFoodPets.length}</div>
+            <button type="button" className="ghost" onClick={() => setFoodLimit((n) => n + 60)}>Show more</button>
+          </div>
+        )}
+        {actionStats.foodNameStats.length > 0 && (
+          <>
+          <h3 style={{ marginTop: "1.5rem", marginBottom: "0.25rem" }}>Named Consumables</h3>
+          <p className="section-hint" style={{ marginTop: 0 }}>
+            Only ~{(() => {
+              const s = actionStats.summary || {};
+              const tf = Number(s.totalFoods || 0);
+              const nf = Number(s.namedFoods || 0);
+              return tf ? Math.round((100 * nf) / tf) : 0;
+            })()}% of consumables can be identified by name — most are bought and used mid-turn, so they never
+            appear in a shop snapshot. This is the identifiable subset; treat these winrates as indicative.
+          </p>
+          <div className={statsCardsClass}>
+            {actionStats.foodNameStats.map((row) => {
+              const games = Number(row.games || 0);
+              const wins = Number(row.wins || 0);
+              const draws = Number(row.draws || 0);
+              const losses = Math.max(0, games - wins - draws);
+              return (
+                <div className="stats-card" key={`foodname-${row.food_name}`}>
+                  <div className="stats-card-head"><h4>{row.food_name}</h4></div>
+                  <div className="stats-card-meta">{row.uses} uses · {games} games</div>
+                  <div className="stats-card-metrics">
+                    <div className="rate-win">Winrate: {formatPct(games ? wins / games : 0)}</div>
+                    <div className="rate-loss">Lossrate: {formatPct(games ? losses / games : 0)}</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          </>
         )}
         </>
         )}
