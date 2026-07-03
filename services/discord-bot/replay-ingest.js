@@ -1,5 +1,6 @@
 const { Pool } = require("pg");
 const { parseReplay } = require("../../lib/parse");
+const { insertActions } = require("../../lib/actions");
 const { fetchParticipationReplay } = require("../../lib/sapPlayback");
 const { registerReplayInsertAndMaybeStartTopBoards } = require("../../lib/topBoardsAutoRun");
 
@@ -326,6 +327,8 @@ async function ingestParticipationReplay(rawParticipationId) {
         ])
       );
     }
+
+    await insertActions(client, replayId, finalParsed.actions);
 
     try {
       const autoRun = await registerReplayInsertAndMaybeStartTopBoards({

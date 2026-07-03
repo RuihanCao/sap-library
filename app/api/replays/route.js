@@ -1,6 +1,7 @@
 ﻿import { NextResponse } from "next/server";
 import { pool } from "@/lib/db";
 const { parseReplay } = require("@/lib/parse");
+const { insertActions } = require("@/lib/actions");
 const { fetchParticipationReplay } = require("@/lib/sapPlayback");
 const { rateLimit, applyRateLimitHeaders, rateLimitResponse } = require("@/lib/rateLimit");
 const { registerReplayInsertAndMaybeStartTopBoards } = require("@/lib/topBoardsAutoRun");
@@ -316,6 +317,8 @@ export async function POST(req) {
         ])
       );
     }
+
+    await insertActions(client, replayId, finalParsed.actions);
 
     try {
       const autoRun = await registerReplayInsertAndMaybeStartTopBoards({

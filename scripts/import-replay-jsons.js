@@ -5,6 +5,7 @@ const os = require("os");
 const dotenv = require("dotenv");
 const { Pool } = require("pg");
 const { parseReplay } = require("../lib/parse");
+const { insertActions } = require("../lib/actions");
 
 dotenv.config({ path: path.resolve(process.cwd(), ".env.local") });
 dotenv.config();
@@ -287,6 +288,8 @@ async function ingestReplay(client, raw, filePath, indexInFile) {
         petValues
       );
     }
+
+    await insertActions(client, replayId, finalParsed.actions);
 
     await client.query("commit");
     return { status: "inserted" };

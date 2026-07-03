@@ -59,6 +59,22 @@ create table if not exists pets (
   toy text
 );
 
+-- Per-action player log decoded from raw_json (see lib/actions.js). Every row is
+-- an action by the replay owner: buy, move, merge, buy_merge, sell, food. This
+-- captures in-shop decisions that the board snapshots in `pets` cannot show.
+create table if not exists actions (
+  id uuid primary key default uuid_generate_v4(),
+  replay_id uuid not null references replays(id) on delete cascade,
+  turn_number int,
+  seq int not null,
+  action_type text not null check (action_type in ('buy','move','merge','buy_merge','sell','food')),
+  pet_name text,
+  target_pet_name text,
+  food_name text,
+  position int,
+  unique (replay_id, seq)
+);
+
 create table if not exists hidden_players (
   player_id text primary key,
   reason text,
@@ -108,6 +124,11 @@ create index if not exists idx_pets_replay_id on pets(replay_id);
 create index if not exists idx_pets_replay_turn_side_pet on pets(replay_id, turn_number, side, pet_name);
 create index if not exists idx_pets_replay_turn_side_perk on pets(replay_id, turn_number, side, perk) where perk is not null;
 create index if not exists idx_pets_replay_turn_side_toy on pets(replay_id, turn_number, side, toy) where toy is not null;
+create index if not exists idx_actions_replay_id on actions(replay_id);
+create index if not exists idx_actions_type on actions(action_type);
+create index if not exists idx_actions_pet_name on actions(pet_name) where pet_name is not null;
+create index if not exists idx_actions_food_name on actions(food_name) where food_name is not null;
+create index if not exists idx_actions_replay_type_pet on actions(replay_id, action_type, pet_name);
 create index if not exists idx_replays_stats_scope on replays(match_type, pack, opponent_pack, created_at desc);
 create index if not exists idx_hidden_players_hidden_at on hidden_players(hidden_at desc);
 create index if not exists idx_player_tags_tags on player_tags using gin (tags);
